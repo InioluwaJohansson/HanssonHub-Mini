@@ -28,7 +28,7 @@ function NavItem({ icon: Icon, label, active, onClick, activeColorClass }: NavIt
 
 export function BottomNav({ currentView, setView }: { currentView: ViewType, setView: (v: ViewType) => void }) {
   return (
-    <nav className="h-[72px] border-t border-zinc-100 bg-white flex items-center justify-around px-2 pb-safe z-40 relative shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
+    <nav className="h-[72px] border-t border-black bg-white flex items-center justify-around px-2 pb-safe z-40 relative shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
       <NavItem 
         icon={LayoutDashboard} 
         label="Dash" 

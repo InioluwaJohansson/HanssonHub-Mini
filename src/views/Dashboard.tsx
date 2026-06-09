@@ -1,14 +1,18 @@
-import { useState, useEffect } from 'react';
-import { Camera, ShieldCheck, DoorClosed, AlertCircle, LayoutDashboard, FileText } from 'lucide-react';
-import { GetLogDto, generateMockLogs } from '../utils/mockData';
+import { useEffect } from 'react';
+import { Camera, ShieldCheck, FileText, LayoutDashboard } from 'lucide-react';
+import { useLogs } from '../context/LogsContext';
 
 export default function Dashboard() {
-  const [recentLogs, setRecentLogs] = useState<GetLogDto[]>([]);
+  const { logs, fetchLogs } = useLogs();
   
   useEffect(() => {
-    // Take first 10 for dashboard preview
-    setRecentLogs(generateMockLogs(0, 10));
-  }, []);
+    if (logs.length === 0) {
+      fetchLogs();
+    }
+  }, [logs.length, fetchLogs]);
+
+  // Take first 10 for dashboard preview
+  const recentLogs = logs.slice(0, 10);
 
   return (
     <div className="p-5 flex flex-col gap-3">
@@ -49,24 +53,24 @@ export default function Dashboard() {
         </h3>
         
         <div className="flex flex-col gap-3">
-          {recentLogs.map((log) => (
-            <div key={log.Id} className="flex flex-col">
+          {recentLogs.map((log, index) => (
+            <div key={log.Id ?? (log as any).id ?? index} className="flex flex-col">
               <div className="bg-white p-3 rounded-xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow relative">
                 <div className="flex items-center gap-3 mb-2 pb-2 border-b border-zinc-50">
                   <img 
-                    src={log.GetPersonDto.GetPersonDetailsDto.ImageUrl} 
+                    src={log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://i.pravatar.cc/150'} 
                     alt="" 
                     className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
                   />
                   <div className="flex-1 flex justify-between items-center">
-                    <p className="font-bold text-zinc-900 text-xs">{log.GetPersonDto.GetPersonDetailsDto.FirstName} {log.GetPersonDto.GetPersonDetailsDto.LastName}</p>
-                    <p className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 tracking-wider uppercase">{log.ActionType}</p>
+                    <p className="font-bold text-zinc-900 text-xs">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
+                    <p className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 tracking-wider uppercase">{log.ActionType || (log as any).actionType}</p>
                   </div>
                 </div>
-                <p className="text-xs text-zinc-600 font-medium">{log.LogDetails}</p>
+                <p className="text-xs text-zinc-600 font-medium">{log.LogDetails || (log as any).logDetails}</p>
                 <div className="mt-2 flex justify-end">
                    <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block text-right">
-                     {new Date(log.TimeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                     {new Date(log.TimeOfAction || (log as any).timeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                    </span>
                 </div>
               </div>

@@ -1,17 +1,83 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { Eye, EyeOff, User, Lock, LogIn, Shield } from 'lucide-react';
+import { Eye, EyeOff, User, Lock, LogIn, Shield, LoaderCircle, Fingerprint } from 'lucide-react';
+import { loginUser, saveToken, saveUserDetails } from '../utils/api';
+import { isBiometricAvailable, registerBiometric, authenticateBiometric, getBiometricStoredToken, getBiometricStoredDetails, saveBiometricStoredToken } from '../utils/biometrics';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [hasStoredBiometric, setHasStoredBiometric] = useState(false);
 
-  const handleLogin = () => {
+  useEffect(() => {
+    isBiometricAvailable().then(available => {
+      setBiometricAvailable(available);
+      if (getBiometricStoredToken()) {
+        setHasStoredBiometric(true);
+      }
+    });
+  }, []);
+
+  const handleBiometricLogin = async () => {
+    setError('');
+    setIsLoading(true);
+    try {
+      const success = await authenticateBiometric();
+      if (success) {
+        const t = getBiometricStoredToken();
+        const d = getBiometricStoredDetails();
+        if (t) {
+          saveToken(t);
+          if (d) saveUserDetails(d);
+          onLogin();
+          return;
+        } else {
+          setError('No stored token found for fingerprint.');
+        }
+      } else {
+        setError('Fingerprint verification failed.');
+      }
+    } catch (e) {
+      setError('Fingerprint verification error.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleLogin = async () => {
     setIsSubmitted(true);
+    setError('');
     if (username && password) {
-      onLogin();
+      setIsLoading(true);
+      try {
+        const response = await loginUser(username, password);
+        if (response.status && response.token) {
+          saveToken(response.token);
+          if (response.data) {
+            saveUserDetails(response.data);
+          }
+          
+          if (biometricAvailable) {
+             const success = await registerBiometric(username);
+             if (success) {
+                saveBiometricStoredToken(response.token, response.data);
+             }
+          }
+          
+          onLogin();
+        } else {
+          setError(response.message || 'Login failed');
+        }
+      } catch (err) {
+        setError('An error occurred during login');
+      } finally {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -34,26 +100,26 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           <div className="space-y-7">
             {/* Username Input */}
             <div className="relative w-full flex items-center group">
-              <User size={18} className={`absolute left-0 transition-colors ${isSubmitted && !username ? 'text-red-500' : 'text-zinc-400 group-focus-within:text-black'}`} />
+              <User size={18} className={`absolute left-0 transition-colors ${error || (isSubmitted && !username) ? 'text-red-500' : username ? 'text-emerald-500' : 'text-zinc-400 group-focus-within:text-black'}`} />
               <input
                 type="text"
                 placeholder="Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className={`w-full py-2 pl-8 bg-transparent border-b-2 focus:outline-none placeholder-zinc-400 text-black rounded-none peer ${isSubmitted && !username ? 'border-red-500' : 'border-zinc-200'}`}
+                className={`w-full py-2 pl-8 bg-transparent border-b-2 focus:outline-none placeholder-zinc-400 text-black rounded-none peer ${error || (isSubmitted && !username) ? 'border-red-500' : username ? 'border-emerald-500' : 'border-zinc-200'}`}
               />
-              <div className={`absolute bottom-0 left-0 h-[2px] w-0 peer-focus:w-full transition-all duration-300 ${isSubmitted && !username ? 'bg-red-500' : 'bg-black'}`}></div>
+              <div className={`absolute bottom-0 left-0 h-[2px] w-0 peer-focus:w-full transition-all duration-300 ${error || (isSubmitted && !username) ? 'bg-red-500' : username ? 'bg-emerald-500' : 'bg-black'}`}></div>
             </div>
 
             {/* Password Input */}
             <div className="relative flex items-center w-full group">
-              <Lock size={18} className={`absolute left-0 transition-colors ${isSubmitted && !password ? 'text-red-500' : 'text-zinc-400 group-focus-within:text-black'}`} />
+              <Lock size={18} className={`absolute left-0 transition-colors ${error || (isSubmitted && !password) ? 'text-red-500' : password ? 'text-emerald-500' : 'text-zinc-400 group-focus-within:text-black'}`} />
               <input
                 type={showPassword ? "text" : "password"}
                 placeholder="Password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={`w-full py-2 pl-8 pr-8 bg-transparent border-b-2 focus:outline-none placeholder-zinc-400 text-black rounded-none peer ${isSubmitted && !password ? 'border-red-500' : 'border-zinc-200'}`}
+                className={`w-full py-2 pl-8 pr-8 bg-transparent border-b-2 focus:outline-none placeholder-zinc-400 text-black rounded-none peer ${error || (isSubmitted && !password) ? 'border-red-500' : password ? 'border-emerald-500' : 'border-zinc-200'}`}
               />
               <div 
                 className="absolute right-0 cursor-pointer text-zinc-400 hover:text-black z-10 transition-colors"
@@ -61,16 +127,34 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </div>
-              <div className={`absolute bottom-0 left-0 h-[2px] w-0 peer-focus:w-full transition-all duration-300 ${isSubmitted && !password ? 'bg-red-500' : 'bg-black'}`}></div>
+              <div className={`absolute bottom-0 left-0 h-[2px] w-0 peer-focus:w-full transition-all duration-300 ${error || (isSubmitted && !password) ? 'bg-red-500' : password ? 'bg-emerald-500' : 'bg-black'}`}></div>
             </div>
 
-            <button
-              onClick={handleLogin}
-              className="w-full flex items-center justify-center gap-2 bg-transparent text-black py-3 font-bold text-sm tracking-widest mt-4 border-2 border-black rounded-md"
-            >
-              <LogIn size={18} strokeWidth={2.5} />
-              Sign in
-            </button>
+            <div className="flex gap-2 mt-4">
+              <button
+                onClick={handleLogin}
+                disabled={isLoading}
+                className={`flex items-center justify-center gap-2 bg-transparent text-black py-3 font-bold text-sm tracking-widest border-2 border-black rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${hasStoredBiometric ? 'w-[80%]' : 'w-full'}`}
+              >
+                {isLoading ? <LoaderCircle size={18} className="animate-spin" /> : <LogIn size={18} strokeWidth={2.5} />}
+                {isLoading ? 'SIGNING IN...' : 'Sign in'}
+              </button>
+              
+              {hasStoredBiometric && (
+                <button
+                  onClick={handleBiometricLogin}
+                  disabled={isLoading}
+                  title="Login with Fingerprint"
+                  className="w-[20%] flex items-center justify-center bg-black text-white py-3 border-2 border-black rounded-md hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Fingerprint size={24} />
+                </button>
+              )}
+            </div>
+            
+            {error && (
+              <p className="text-red-500 text-xs text-center font-bold tracking-wide">{error}</p>
+            )}
           </div>
         </div>
       </div>

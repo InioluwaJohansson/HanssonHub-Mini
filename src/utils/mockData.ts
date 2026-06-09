@@ -33,11 +33,17 @@ export type GetPersonDto = {
 
 export type GetLogDto = {
     Id: number;
+    id?: number;
     GetPersonDto: GetPersonDto;
+    getPersonDto?: any;
     PersonId: number;
+    personId?: number;
     ActionType: string;
+    actionType?: string;
     TimeOfAction: string;
+    timeOfAction?: string;
     LogDetails: string;
+    logDetails?: string;
 }
 
 export const generateMockLogs = (startIndex: number, count: number): GetLogDto[] => {
