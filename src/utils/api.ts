@@ -1,7 +1,8 @@
 import axios from 'axios';
 
 const BASE_URL = 'https://kv5zhpcr-7190.uks1.devtunnels.ms/Home_Security';
-
+//q9l0xpmb lenovo
+//kv5zhpcr dell
 export const saveToken = (token: string) => {
   localStorage.setItem('auth_token', token);
 };
@@ -37,6 +38,13 @@ api.interceptors.request.use((config) => {
 export const loginUser = async (userName: string, password: string) => {
   const response = await api.get('/User/Login', {
     params: { userName, password },
+  });
+  return response.data;
+};
+
+export const verifyAuthCode = async (authCode: string) => {
+  const response = await api.post('/User/VerifyAuthCode', "", {
+    params: { authCode },
   });
   return response.data;
 };

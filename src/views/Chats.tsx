@@ -19,6 +19,7 @@ const chatList: ChatRoom[] = [
 export default function Chats({ onChatActive }: { onChatActive: (isActive: boolean) => void }) {
   const [activeChat, setActiveChat] = useState<ChatRoom | null>(null);
   const [messageText, setMessageText] = useState('');
+  const [replyTo, setReplyTo] = useState<{ id: string, text: string } | null>(null);
   
   // Attachments & Audio state
   const [isRecording, setIsRecording] = useState(false);
@@ -30,7 +31,7 @@ export default function Chats({ onChatActive }: { onChatActive: (isActive: boole
   const scrollRef = useRef<HTMLDivElement>(null);
   
   // Custom mock messages for current chat
-  const [messages, setMessages] = useState<{ id: string, text: string, time: string, isMe: boolean, type: 'text' | 'image' | 'audio', mediaUrl?: string, duration?: number }[]>([
+  const [messages, setMessages] = useState<{ id: string, text: string, time: string, isMe: boolean, type: 'text' | 'image' | 'audio', mediaUrl?: string, duration?: number, replyTo?: { text: string } }[]>([
     { id: 'msg1', text: 'All parameters are secure.', time: '10:42 AM', isMe: false, type: 'text' }
   ]);
 
@@ -266,16 +267,35 @@ export default function Chats({ onChatActive }: { onChatActive: (isActive: boole
                 )}
                 
                 {isRecording ? (
-                  <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-red-50 text-red-500 animate-pulse">
-                    <Mic size={18} />
-                    <span className="text-xs font-bold font-mono">0:{recordingDuration.toString().padStart(2, '0')}</span>
+                  <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-red-50 text-red-500">
+                    <motion.div 
+                      key="recording-waves"
+                      className="flex gap-0.5 items-end h-4"
+                      initial="hidden"
+                      animate="visible"
+                    >
+                      {[...Array(5)].map((_, i) => (
+                        <motion.div
+                          key={i}
+                          className="w-1 bg-red-500 rounded-full"
+                          variants={{
+                            hidden: { height: 4 },
+                            visible: { 
+                                height: [4, 16, 4],
+                                transition: { repeat: Infinity, duration: 0.8, delay: i * 0.1 } 
+                            }
+                          }}
+                        />
+                      ))}
+                    </motion.div>
+                    <span className="text-xs font-bold font-mono tabular-nums">0:{recordingDuration.toString().padStart(2, '0')}</span>
                   </div>
                 ) : (
                   <textarea 
                     value={messageText}
                     onChange={(e) => setMessageText(e.target.value)}
                     placeholder="Message"
-                    className="flex-1 bg-transparent resize-none max-h-24 min-h-[40px] px-1 py-3 text-xs text-zinc-800 focus:outline-none placeholder-zinc-400"
+                    className="flex-1 bg-transparent resize-none max-h-24 min-h-[40px] px-3 py-3 text-xs text-zinc-800 focus:outline-none placeholder-zinc-400"
                     rows={1}
                   />
                 )}

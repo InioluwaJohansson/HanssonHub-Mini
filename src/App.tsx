@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Splash from './components/Splash';
 import Login from './components/Login';
 import { Header } from './components/Header';
@@ -7,6 +7,7 @@ import Dashboard from './views/Dashboard';
 import Doors from './views/Doors';
 import Cameras from './views/Cameras';
 import Chats from './views/Chats';
+import { startHomeSecurityHub, startChatHub, homeSecurityHubConnection, chatHubConnection } from './utils/signalr';
 
 import Logs from './views/Logs';
 
@@ -16,6 +17,16 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>('splash');
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [navHidden, setNavHidden] = useState(false);
+
+  useEffect(() => {
+    if (appState === 'app') {
+      startHomeSecurityHub();
+      startChatHub();
+    } else {
+      homeSecurityHubConnection.stop();
+      chatHubConnection.stop();
+    }
+  }, [appState]);
 
   return (
     <div className="min-h-screen bg-zinc-100 flex items-center justify-center font-sans tracking-normal overflow-hidden select-none">

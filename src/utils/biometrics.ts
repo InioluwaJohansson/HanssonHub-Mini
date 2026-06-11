@@ -71,9 +71,8 @@ export const authenticateBiometric = async () => {
   return false;
 };
 
-export const saveBiometricStoredToken = (token: string, details: any) => {
+export const saveBiometricStoredToken = (token: string) => {
   localStorage.setItem('biometric_stored_token', token);
-  localStorage.setItem('biometric_stored_details', JSON.stringify(details));
 };
 
 export const getBiometricStoredToken = () => {
@@ -81,6 +80,5 @@ export const getBiometricStoredToken = () => {
 };
 
 export const getBiometricStoredDetails = () => {
-  const d = localStorage.getItem('biometric_stored_details');
-  return d ? JSON.parse(d) : null;
+  return null;
 };
