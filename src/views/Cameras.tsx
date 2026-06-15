@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Maximize2, X, AlertCircle, Video } from 'lucide-react';
+import { Maximize2, X, AlertCircle, Video, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllCameras } from '../utils/api';
+import { homeSecurityHubConnection } from '../utils/signalr';
 
 type CameraData = {
   id: string;
@@ -12,6 +13,7 @@ type CameraData = {
 export default function Cameras() {
   const [cameras, setCameras] = useState<CameraData[]>([]);
   const [expandedCam, setExpandedCam] = useState<CameraData | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const fetchCameras = async () => {
@@ -31,6 +33,41 @@ export default function Cameras() {
       }
     };
     fetchCameras();
+
+    const handleCameraCreated = (data: any) => {
+       setCameras(prev => {
+          const newCam = {
+            id: String(data.id ?? data.Id),
+            name: data.cameraName ?? data.CameraName,
+            imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop'
+          };
+          if (prev.find(c => c.id === newCam.id)) return prev;
+          return [newCam, ...prev];
+       });
+    };
+
+    const handleCameraUpdated = (data: any) => {
+       setCameras(prev => prev.map(c => String(c.id) === String(data.id ?? data.Id) ? {
+          ...c,
+          name: data.cameraName ?? data.CameraName ?? c.name,
+          imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? c.imgUrl
+       } : c));
+    };
+
+    const handleCameraDeleted = (data: any) => {
+       setCameras(prev => prev.filter(c => String(c.id) !== String(data.id ?? data.Id)));
+       setExpandedCam(prev => String(prev?.id) === String(data.id ?? data.Id) ? null : prev);
+    };
+
+    homeSecurityHubConnection.on("CameraCreated", handleCameraCreated);
+    homeSecurityHubConnection.on("CameraUpdated", handleCameraUpdated);
+    homeSecurityHubConnection.on("CameraDeleted", handleCameraDeleted);
+
+    return () => {
+       homeSecurityHubConnection.off("CameraCreated", handleCameraCreated);
+       homeSecurityHubConnection.off("CameraUpdated", handleCameraUpdated);
+       homeSecurityHubConnection.off("CameraDeleted", handleCameraDeleted);
+    };
   }, []);
 
   return (
@@ -41,9 +78,20 @@ export default function Cameras() {
           <p className="text-xs text-zinc-500 font-medium tracking-wide">Live surveillance feeds</p>
         </div>
         
+        <div className="relative mb-2">
+          <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input 
+            type="text" 
+            placeholder="Search cameras by name..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors"
+          />
+        </div>
+
         <div className="flex flex-col gap-5">
           {cameras.length > 0 ? (
-            cameras.map(cam => (
+            cameras.filter(cam => cam.name?.toLowerCase().includes(searchQuery.toLowerCase())).map(cam => (
               <div 
                 key={cam.id} 
                 className="group cursor-pointer bg-white rounded-2xl overflow-hidden shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_8px_30px_rgb(0,0,0,0.12)] transition-all border border-purple-100"

@@ -47,8 +47,6 @@ export const registerBiometric = async (username: string) => {
 };
 
 export const authenticateBiometric = async () => {
-  // If not previously registered, this probably won't pass without proper challenge match, 
-  // but for a simple non-backend WebAuthn it acts as a local auth prompt.
   const challenge = new Uint8Array(32);
   window.crypto.getRandomValues(challenge);
 
@@ -77,8 +75,4 @@ export const saveBiometricStoredToken = (token: string) => {
 
 export const getBiometricStoredToken = () => {
   return localStorage.getItem('biometric_stored_token');
-};
-
-export const getBiometricStoredDetails = () => {
-  return null;
 };

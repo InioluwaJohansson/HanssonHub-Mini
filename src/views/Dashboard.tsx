@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Camera, ShieldCheck, FileText, LayoutDashboard } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
+import { motion } from 'motion/react';
 
 export default function Dashboard() {
   const { logs, fetchLogs } = useLogs();
@@ -52,7 +53,14 @@ export default function Dashboard() {
            <FileText size={14} /> Recent Logs
         </h3>
         
-        <div className="flex flex-col gap-3">
+        {logs.length === 0 ? (
+          <div className="flex justify-center items-center py-10 gap-1.5">
+            <motion.div className="w-2 h-2 rounded-full bg-indigo-500" animate={{ y: [0, -6, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0 }} />
+            <motion.div className="w-2 h-2 rounded-full bg-indigo-500" animate={{ y: [0, -6, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} />
+            <motion.div className="w-2 h-2 rounded-full bg-indigo-500" animate={{ y: [0, -6, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
           {recentLogs.map((log, index) => (
             <div key={log.Id ?? (log as any).id ?? index} className="flex flex-col">
               <div className="bg-white p-3 rounded-xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow relative">
@@ -77,6 +85,7 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+        )}
       </div>
     </div>
   );

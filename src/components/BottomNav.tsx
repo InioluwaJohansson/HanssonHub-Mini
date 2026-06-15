@@ -1,6 +1,6 @@
 import { LayoutDashboard, Video, DoorClosed, MessageCircle, FileText } from 'lucide-react';
 
-export type ViewType = 'dashboard' | 'cameras' | 'doors' | 'chats' | 'logs';
+export type ViewType = 'dashboard' | 'cameras' | 'doors' | 'chats' | 'logs' | 'settings';
 
 type NavItemProps = {
   icon: any;

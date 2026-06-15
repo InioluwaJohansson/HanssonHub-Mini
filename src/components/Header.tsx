@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { User, LogOut, Shield } from 'lucide-react';
+import { User, LogOut, Shield, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ViewType } from './BottomNav';
 
-export function Header({ onLogout }: { onLogout: () => void }) {
+export function Header({ onLogout, setView }: { onLogout: () => void, setView: (v: ViewType) => void }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -38,14 +39,23 @@ export function Header({ onLogout }: { onLogout: () => void }) {
                animate={{ opacity: 1, y: 0, scale: 1 }}
                exit={{ opacity: 0, y: -5, scale: 0.95 }}
                transition={{ duration: 0.15 }}
-               className="absolute top-12 right-0 w-40 bg-zinc-900 shadow-2xl border border-zinc-800 z-50 rounded-xl overflow-hidden"
+               className="absolute top-12 right-0 w-44 bg-white shadow-xl border-2 border-zinc-200 z-50 rounded-xl overflow-hidden"
              >
+               <button 
+                 onClick={() => {
+                   setDropdownOpen(false);
+                   setView('settings');
+                 }}
+                 className="w-full text-left px-4 py-3.5 text-xs font-bold text-zinc-800 hover:bg-zinc-50 uppercase tracking-widest transition-colors flex items-center gap-3 border-b-2 border-zinc-100"
+               >
+                 <Settings size={16} /> SETTINGS
+               </button>
                <button 
                  onClick={() => {
                    setDropdownOpen(false);
                    onLogout();
                  }}
-                 className="w-full text-left px-4 py-3.5 text-xs font-bold text-red-400 hover:bg-zinc-800 uppercase tracking-widest transition-colors flex items-center gap-3"
+                 className="w-full text-left px-4 py-3.5 text-xs font-bold text-red-600 hover:bg-red-50 uppercase tracking-widest transition-colors flex items-center gap-3"
                >
                  <LogOut size={16} /> LOGOUT
                </button>

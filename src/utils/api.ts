@@ -43,9 +43,12 @@ export const loginUser = async (userName: string, password: string) => {
 };
 
 export const verifyAuthCode = async (authCode: string) => {
-  const response = await api.post('/User/VerifyAuthCode', "", {
-    params: { authCode },
-  });
+  const response = await api.post(`/User/VerifyAuthCode?authCode=${encodeURIComponent(authCode)}`);
+  return response.data;
+};
+
+export const refreshToken = async () => {
+  const response = await api.post('/User/RefreshToken');
   return response.data;
 };
 
@@ -72,5 +75,88 @@ export const getAllDoorsByDoorType = async (doorType: number = 3) => {
 
 export const getAllCameras = async () => {
   const response = await api.post('/Camera/GetAllCameras');
+  return response.data;
+};
+
+export const changePassword = async (data: any) => {
+  const response = await api.put('/User/ChangePassword', data);
+  return response.data;
+};
+
+export const changeAuthCode = async (data: any) => {
+  const response = await api.put('/User/ChangeAuthorizationCode', data);
+  return response.data;
+};
+
+export const createDirectChat = async (recipientPersonId: number) => {
+  const response = await api.post(`/Chat/CreateChat?recipientPersonId=${recipientPersonId}`);
+  return response.data;
+};
+
+export const createGroupChat = async (name: string, description: string, participantPersonIds: number[], imageFile: File | null) => {
+  const formData = new FormData();
+  if (imageFile) {
+    formData.append('ImageUrl', imageFile);
+  }
+  
+  const params = new URLSearchParams();
+  params.append('Name', name);
+  if (description) {
+    params.append('Description', description);
+  }
+  participantPersonIds.forEach(id => {
+    params.append('ParticipantPersonIds', id.toString());
+  });
+  
+  const response = await api.post(`/Chat/CreateGroupChat?${params.toString()}`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    }
+  });
+  return response.data;
+};
+
+export const getChatById = async (id: number) => {
+  const response = await api.get(`/Chat/GetChatById?id=${id}`);
+  return response.data;
+};
+
+export const getMyChats = async () => {
+  const response = await api.get('/Chat/GetMyChats');
+  return response.data;
+};
+
+export const removeParticipant = async (chatId: number, recipientId: number) => {
+  const response = await api.put(`/Chat/RemoveParticipant?chatId=${chatId}&recipientId=${recipientId}`);
+  return response.data;
+};
+
+export const addParticipants = async (chatId: number, personIds: number[]) => {
+  const response = await api.post(`/Chat/AddParticipant?chatId=${chatId}`, { personIds });
+  return response.data;
+};
+
+export const sendMessage = async (data: { chatId: number; content?: string; type: number; attachments: any[] }) => {
+  const response = await api.post('/Message/SendMessage', data);
+  return response.data;
+};
+
+export const editMessage = async (data: { messageId: number; content: string }) => {
+  const response = await api.post('/Message/EditMessage', data);
+  return response.data;
+};
+
+export const getChatMessages = async (chatId: number, page: number = 1, pageSize: number = 100) => {
+  const response = await api.get(`/Message/GetChatMessages?chatId=${chatId}&page=${page}&pageSize=${pageSize}`);
+  return response.data;
+};
+
+export const deleteMessage = async (messageId: number) => {
+  const response = await api.post(`/Message/DeleteMessage?messageId=${messageId}`);
+  return response.data;
+};
+
+export const getUnreadCount = async (chatId: number) => {
+  const response = await api.get(`/Message/GetUnreadCount?chatId=${chatId}`);
   return response.data;
 };

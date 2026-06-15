@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, X, Activity, Clock, Info, Calendar, Search } from 'lucide-react';
 import { GetLogDto } from '../utils/mockData';
 import { useLogs } from '../context/LogsContext';
+import { motion } from 'motion/react';
 
 export default function Logs() {
   const { logs, hasMore, loading, fetchLogs, fetchLogsByDate, clearLogs } = useLogs();
@@ -95,9 +96,12 @@ export default function Logs() {
         {logs.map((log, index) => {
           const isLast = index === logs.length - 1;
           return (
-            <div 
-              ref={isLast ? lastLogElementRef : null}
-              key={log.Id ?? log.id ?? index} 
+            <motion.div 
+              ref={isLast ? lastLogElementRef as any : null}
+              key={log.Id ?? log.id ?? index}
+              initial={{ opacity: 0, x: -60 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
               className="border border-slate-200 p-4 bg-white rounded-xl shadow-sm hover:shadow-md hover:border-slate-300 transition-all cursor-pointer flex items-center gap-4"
               onClick={() => setSelectedLog(log)}
             >
@@ -109,7 +113,7 @@ export default function Logs() {
                 </div>
                 <p className="text-xs font-semibold text-blue-600 mt-1">{log.ActionType || (log as any).actionType}</p>
               </div>
-            </div>
+            </motion.div>
           );
         })}
         {loading && (

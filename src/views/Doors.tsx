@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { DoorOpen, DoorClosed, Lock, Unlock } from 'lucide-react';
+import { DoorOpen, DoorClosed, Lock, Unlock, Search } from 'lucide-react';
 import { motion } from 'motion/react';
 import { getAllDoorsByDoorType } from '../utils/api';
+import { homeSecurityHubConnection } from '../utils/signalr';
 
 type DoorData = {
   id: string;
@@ -12,6 +13,7 @@ type DoorData = {
 
 export default function Doors() {
   const [doors, setDoors] = useState<DoorData[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     const fetchDoors = async () => {
@@ -31,6 +33,36 @@ export default function Doors() {
       }
     };
     fetchDoors();
+
+    const handleDoorCreated = (data: any) => {
+       setDoors(prev => {
+          const newDoor = { 
+             id: String(data.id ?? data.Id), 
+             name: data.doorName ?? data.DoorName, 
+             isLocked: data.isLocked ?? data.IsLocked, 
+             isOpen: data.isOpen ?? data.IsOpen 
+          };
+          if (prev.find(d => d.id === newDoor.id)) return prev;
+          return [newDoor, ...prev];
+       });
+    };
+
+    const handleDoorUpdated = (data: any) => {
+       setDoors(prev => prev.map(d => String(d.id) === String(data.id ?? data.Id) ? { 
+          ...d, 
+          name: data.doorName ?? data.DoorName ?? d.name, 
+          isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked, 
+          isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen 
+       } : d));
+    };
+
+    homeSecurityHubConnection.on("DoorCreated", handleDoorCreated);
+    homeSecurityHubConnection.on("DoorUpdated", handleDoorUpdated);
+
+    return () => {
+       homeSecurityHubConnection.off("DoorCreated", handleDoorCreated);
+       homeSecurityHubConnection.off("DoorUpdated", handleDoorUpdated);
+    };
   }, []);
 
   const toggleLock = (id: string) => {
@@ -48,9 +80,20 @@ export default function Doors() {
         <p className="text-xs text-zinc-500 font-medium tracking-wide">Manage secure access points</p>
       </div>
       
+      <div className="relative mb-2">
+        <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
+        <input 
+          type="text" 
+          placeholder="Search doors by name..." 
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-full bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors"
+        />
+      </div>
+
       <div className="flex flex-col gap-4">
         {doors.length > 0 ? (
-          doors.map(door => (
+          doors.filter(door => door.name?.toLowerCase().includes(searchQuery.toLowerCase())).map(door => (
             <div key={door.id} className={`border p-5 flex flex-col gap-4 bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden ${door.isLocked && !door.isOpen ? 'border-amber-100' : 'border-red-200'}`}>
               <div className={`absolute top-0 left-0 w-1.5 h-full ${door.isLocked && !door.isOpen ? 'bg-amber-400' : 'bg-red-500'}`}></div>
               <div className="flex justify-between items-center pl-2">

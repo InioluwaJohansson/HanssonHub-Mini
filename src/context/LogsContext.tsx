@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { GetLogDto } from '../utils/mockData';
 import { getAllLogs, getAllLogsByDate } from '../utils/api';
+import { homeSecurityHubConnection } from '../utils/signalr';
 
 interface LogsContextType {
   logs: GetLogDto[];
@@ -10,6 +11,7 @@ interface LogsContextType {
   fetchLogs: (reset?: boolean) => Promise<void>;
   fetchLogsByDate: (startDate: string, endDate: string, reset?: boolean) => Promise<void>;
   clearLogs: () => void;
+  addLog: (log: any) => void;
 }
 
 const LogsContext = createContext<LogsContextType | undefined>(undefined);
@@ -26,6 +28,82 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPage(1);
     setHasMore(true);
   }, []);
+
+  const addLog = useCallback((logData: any) => {
+     setLogs(prev => {
+        const getPersonDto = logData.getPersonDto ?? logData.GetPersonDto;
+        const getPersonDetailsDto = getPersonDto?.getPersonDetailsDto ?? getPersonDto?.GetPersonDetailsDto;
+        const getUserDto = getPersonDto?.getUserDto ?? getPersonDto?.GetUserDto;
+
+        const normalizedPersonDetails = getPersonDetailsDto ? {
+          Id: getPersonDetailsDto.Id ?? getPersonDetailsDto.id,
+          id: getPersonDetailsDto.Id ?? getPersonDetailsDto.id,
+          FirstName: getPersonDetailsDto.FirstName ?? getPersonDetailsDto.firstName,
+          firstName: getPersonDetailsDto.FirstName ?? getPersonDetailsDto.firstName,
+          LastName: getPersonDetailsDto.LastName ?? getPersonDetailsDto.lastName,
+          lastName: getPersonDetailsDto.LastName ?? getPersonDetailsDto.lastName,
+          ImageUrl: getPersonDetailsDto.ImageUrl ?? getPersonDetailsDto.imageUrl,
+          imageUrl: getPersonDetailsDto.ImageUrl ?? getPersonDetailsDto.imageUrl,
+          Gender: getPersonDetailsDto.Gender ?? getPersonDetailsDto.gender,
+          gender: getPersonDetailsDto.Gender ?? getPersonDetailsDto.gender,
+        } : undefined;
+
+        const normalizedUser = getUserDto ? {
+          Id: getUserDto.Id ?? getUserDto.id,
+          id: getUserDto.Id ?? getUserDto.id,
+          UserName: getUserDto.UserName ?? getUserDto.userName,
+          userName: getUserDto.UserName ?? getUserDto.userName,
+          Role: getUserDto.Role ?? getUserDto.role,
+          role: getUserDto.Role ?? getUserDto.role,
+          RoleName: getUserDto.RoleName ?? getUserDto.roleName,
+          roleName: getUserDto.RoleName ?? getUserDto.roleName,
+        } : undefined;
+
+        const normalizedPerson = getPersonDto ? {
+          Id: getPersonDto.Id ?? getPersonDto.id,
+          id: getPersonDto.Id ?? getPersonDto.id,
+          PersonId: getPersonDto.PersonId ?? getPersonDto.personId,
+          personId: getPersonDto.PersonId ?? getPersonDto.personId,
+          Disabled: getPersonDto.Disabled ?? getPersonDto.disabled,
+          disabled: getPersonDto.Disabled ?? getPersonDto.disabled,
+          GetPersonDetailsDto: normalizedPersonDetails,
+          getPersonDetailsDto: normalizedPersonDetails,
+          GetUserDto: normalizedUser,
+          getUserDto: normalizedUser,
+        } : undefined;
+
+        const newLog = {
+           Id: logData.Id ?? logData.id,
+           id: logData.Id ?? logData.id,
+           PersonId: logData.PersonId ?? logData.personId,
+           personId: logData.PersonId ?? logData.personId,
+           TimeOfAction: logData.TimeOfAction ?? logData.timeOfAction,
+           timeOfAction: logData.TimeOfAction ?? logData.timeOfAction,
+           LogDetails: logData.LogDetails ?? logData.logDetails,
+           logDetails: logData.LogDetails ?? logData.logDetails,
+           ActionType: logData.ActionType ?? logData.actionType,
+           actionType: logData.ActionType ?? logData.actionType,
+           GetPersonDto: normalizedPerson,
+           getPersonDto: normalizedPerson,
+        };
+
+        // avoid duplicate
+        if (prev.find(l => (l.Id ?? l.id) === (newLog.Id ?? newLog.id))) return prev;
+        return [newLog as any as GetLogDto, ...prev];
+     });
+  }, []);
+
+  useEffect(() => {
+     const handleLogCreated = (logData: any) => {
+        addLog(logData);
+     };
+
+     homeSecurityHubConnection.on("LogCreated", handleLogCreated);
+
+     return () => {
+        homeSecurityHubConnection.off("LogCreated", handleLogCreated);
+     };
+  }, [addLog]);
 
   const fetchLogs = useCallback(async (reset = false) => {
     if (isLoadingRef.current || (!hasMore && !reset)) return;
@@ -93,7 +171,7 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [page]);
 
   return (
-    <LogsContext.Provider value={{ logs, hasMore, loading, page, fetchLogs, fetchLogsByDate, clearLogs }}>
+    <LogsContext.Provider value={{ logs, hasMore, loading, page, fetchLogs, fetchLogsByDate, clearLogs, addLog }}>
       {children}
     </LogsContext.Provider>
   );
