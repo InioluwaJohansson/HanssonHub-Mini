@@ -3,6 +3,7 @@ import { Maximize2, X, AlertCircle, Video, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllCameras } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
+import { saveData, getAllData, STORES } from '../utils/db';
 
 type CameraData = {
   id: string;
@@ -16,6 +17,18 @@ export default function Cameras() {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
+    const loadInitial = async () => {
+      try {
+        const cached = await getAllData(STORES.CAMERAS);
+        if (Array.isArray(cached) && cached.length > 0) {
+          setCameras(cached as CameraData[]);
+        }
+      } catch (err) {
+        console.warn("Camera cache load failed:", err);
+      }
+      fetchCameras();
+    };
+
     const fetchCameras = async () => {
       try {
         const response = await getAllCameras();
@@ -27,12 +40,15 @@ export default function Cameras() {
             imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop'
           }));
           setCameras(mappedCameras);
+          // Update cache
+          Promise.all(mappedCameras.map((cam: CameraData) => saveData(STORES.CAMERAS, cam))).catch(e => console.warn('Cam cache save failed:', e));
         }
       } catch (err) {
         console.error("Failed to fetch cameras", err);
       }
     };
-    fetchCameras();
+    
+    loadInitial();
 
     const handleCameraCreated = (data: any) => {
        setCameras(prev => {

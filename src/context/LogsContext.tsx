@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useCallback, useRef, useEff
 import { GetLogDto } from '../utils/mockData';
 import { getAllLogs, getAllLogsByDate } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
+import { saveData, getAllData, STORES } from '../utils/db';
 
 interface LogsContextType {
   logs: GetLogDto[];
@@ -22,6 +23,26 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const isLoadingRef = useRef(false);
+
+  useEffect(() => {
+    const loadCached = async () => {
+      try {
+        const cached = await getAllData(STORES.LOGS);
+        if (Array.isArray(cached) && cached.length > 0) {
+          // Sort by date descending
+          const sorted = [...cached].sort((a, b) => {
+             const da = new Date(a.TimeOfAction || a.timeOfAction).getTime();
+             const db = new Date(b.TimeOfAction || b.timeOfAction).getTime();
+             return db - da;
+          });
+          setLogs(sorted as GetLogDto[]);
+        }
+      } catch (err) {
+        console.warn('Logs cache search failed:', err);
+      }
+    };
+    loadCached();
+  }, []);
 
   const clearLogs = useCallback(() => {
     setLogs([]);
@@ -89,7 +110,10 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // avoid duplicate
         if (prev.find(l => (l.Id ?? l.id) === (newLog.Id ?? newLog.id))) return prev;
-        return [newLog as any as GetLogDto, ...prev];
+        const next = [newLog as any as GetLogDto, ...prev];
+        // Cache new log
+        saveData(STORES.LOGS, newLog).catch(e => console.warn('Log cache save failed:', e));
+        return next;
      });
   }, []);
 
@@ -121,7 +145,10 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const currentIds = new Set(base.map(l => l.Id ?? l.id));
           const newBatch: GetLogDto[] = res.data;
           const filteredNewBatch = newBatch.filter(l => !currentIds.has(l.Id ?? l.id));
-          return [...base, ...filteredNewBatch];
+          const next = [...base, ...filteredNewBatch];
+          // Cache batch
+          Promise.all(filteredNewBatch.map(l => saveData(STORES.LOGS, l))).catch(e => console.warn('Logs batch cache failed:', e));
+          return next;
         });
         setPage(currentPage + 1);
         if (res.data.length < 50) setHasMore(false);

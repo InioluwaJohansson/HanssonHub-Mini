@@ -1,84 +1,88 @@
 import * as signalR from '@microsoft/signalr';
-import { getToken } from './api';
+import { getToken, getBaseUrl } from './api';
 
-export const homeSecurityHubConnection = new signalR.HubConnectionBuilder()
-  .withUrl('https://kv5zhpcr-7190.uks1.devtunnels.ms/HomeSecurityHub', {
+// Create real internal connection
+let activeHomeConnection = new signalR.HubConnectionBuilder()
+  .withUrl(`${getBaseUrl()}/HomeSecurityHub`, {
     accessTokenFactory: () => getToken() || ''
   })
   .withAutomaticReconnect()
   .build();
 
-export const chatHubConnection = new signalR.HubConnectionBuilder()
-  .withUrl('https://kv5zhpcr-7190.uks1.devtunnels.ms/HomeSecurityChatHub', {
-    accessTokenFactory: () => getToken() || ''
-  })
-  .withAutomaticReconnect()
-  .build();
-
-// Logging Interceptors for SignalR Hub Connections
+// Logging Interceptors & Registrations Map
 const homeCallbackMap = new Map<string, Map<any, any>>();
-const chatCallbackMap = new Map<string, Map<any, any>>();
 
-const originalOnHome = homeSecurityHubConnection.on.bind(homeSecurityHubConnection);
-homeSecurityHubConnection.on = (methodName: string, newMethod: (...args: any[]) => void) => {
-  if (!homeCallbackMap.has(methodName)) {
-    homeCallbackMap.set(methodName, new Map());
-  }
-  const methodMap = homeCallbackMap.get(methodName)!;
+interface CallbackRegistration {
+  methodName: string;
+  newMethod: (...args: any[]) => void;
+}
 
-  const wrappedMethod = (...args: any[]) => {
-    console.log(`%c[SignalR HomeHub Event: "${methodName}"]`, 'color: #0088cc; font-weight: bold; font-size: 11px', 'Response:', args[0]);
-    newMethod(...args);
-  };
-  methodMap.set(newMethod, wrappedMethod);
-  originalOnHome(methodName, wrappedMethod);
-};
+const homeRegisteredCallbacks: CallbackRegistration[] = [];
 
-const originalOffHome = homeSecurityHubConnection.off.bind(homeSecurityHubConnection);
-homeSecurityHubConnection.off = (methodName: string, method?: (...args: any[]) => void) => {
-  if (method) {
-    const wrapped = homeCallbackMap.get(methodName)?.get(method);
-    if (wrapped) {
-      originalOffHome(methodName, wrapped);
-      homeCallbackMap.get(methodName)?.delete(method);
-      return;
+// Proxy Hub Connection that remains static module but delegates dynamically to active instance
+export const homeSecurityHubConnection = new Proxy({}, {
+  get(target, prop, receiver) {
+    if (prop === 'on') {
+      return (methodName: string, newMethod: (...args: any[]) => void) => {
+        // Track the registration for reconnection rebuilds
+        homeRegisteredCallbacks.push({ methodName, newMethod });
+        
+        if (!homeCallbackMap.has(methodName)) {
+          homeCallbackMap.set(methodName, new Map());
+        }
+        const methodMap = homeCallbackMap.get(methodName)!;
+
+        const wrappedMethod = (...args: any[]) => {
+          console.log(`%c[SignalR HomeHub Event: "${methodName}"]`, 'color: #0088cc; font-weight: bold; font-size: 11px', 'Response:', args[0]);
+          newMethod(...args);
+        };
+        methodMap.set(newMethod, wrappedMethod);
+        
+        activeHomeConnection.on(methodName, wrappedMethod);
+      };
     }
-  }
-  originalOffHome(methodName, method);
-};
+    
+    if (prop === 'off') {
+      return (methodName: string, method?: (...args: any[]) => void) => {
+        // Remove from tracking registry
+        if (method) {
+          const idx = homeRegisteredCallbacks.findIndex(r => r.methodName === methodName && r.newMethod === method);
+          if (idx !== -1) homeRegisteredCallbacks.splice(idx, 1);
+        } else {
+          let idx = homeRegisteredCallbacks.findIndex(r => r.methodName === methodName);
+          while (idx !== -1) {
+            homeRegisteredCallbacks.splice(idx, 1);
+            idx = homeRegisteredCallbacks.findIndex(r => r.methodName === methodName);
+          }
+        }
 
-const originalOnChat = chatHubConnection.on.bind(chatHubConnection);
-chatHubConnection.on = (methodName: string, newMethod: (...args: any[]) => void) => {
-  if (!chatCallbackMap.has(methodName)) {
-    chatCallbackMap.set(methodName, new Map());
-  }
-  const methodMap = chatCallbackMap.get(methodName)!;
-
-  const wrappedMethod = (...args: any[]) => {
-    console.log(`%c[SignalR ChatHub Event: "${methodName}"]`, 'color: #00a884; font-weight: bold; font-size: 11px', 'Response:', args[0]);
-    newMethod(...args);
-  };
-  methodMap.set(newMethod, wrappedMethod);
-  originalOnChat(methodName, wrappedMethod);
-};
-
-const originalOffChat = chatHubConnection.off.bind(chatHubConnection);
-chatHubConnection.off = (methodName: string, method?: (...args: any[]) => void) => {
-  if (method) {
-    const wrapped = chatCallbackMap.get(methodName)?.get(method);
-    if (wrapped) {
-      originalOffChat(methodName, wrapped);
-      chatCallbackMap.get(methodName)?.delete(method);
-      return;
+        if (method) {
+          const wrapped = homeCallbackMap.get(methodName)?.get(method);
+          if (wrapped) {
+            activeHomeConnection.off(methodName, wrapped);
+            homeCallbackMap.get(methodName)?.delete(method);
+            return;
+          }
+        }
+        activeHomeConnection.off(methodName, method);
+      };
     }
+
+    const value = Reflect.get(activeHomeConnection, prop);
+    if (typeof value === 'function') {
+      return value.bind(activeHomeConnection);
+    }
+    return value;
+  },
+  set(target, prop, value, receiver) {
+    return Reflect.set(activeHomeConnection, prop, value);
   }
-  originalOffChat(methodName, method);
-};
+}) as signalR.HubConnection;
 
 export const startHomeSecurityHub = async () => {
-  if (homeSecurityHubConnection.state === signalR.HubConnectionState.Disconnected) {
+  if (activeHomeConnection.state === signalR.HubConnectionState.Disconnected) {
     try {
-      await homeSecurityHubConnection.start();
+      await activeHomeConnection.start();
       console.log('SignalR HomeSecurityHub Connected.');
     } catch (err) {
       console.log('Error connecting to HomeSecurityHub: ', err);
@@ -86,13 +90,49 @@ export const startHomeSecurityHub = async () => {
   }
 };
 
-export const startChatHub = async () => {
-  if (chatHubConnection.state === signalR.HubConnectionState.Disconnected) {
-    try {
-      await chatHubConnection.start();
-      console.log('SignalR ChatHub Connected.');
-    } catch (err) {
-      console.log('Error connecting to ChatHub: ', err);
+export const rebuildHubConnections = async () => {
+  const baseUrl = getBaseUrl();
+  console.log('[SignalR] Rebuilding and reconnecting SignalR Hubs with Base URL:', baseUrl);
+
+  // 1. Stop existing active connection
+  try {
+    if (activeHomeConnection.state !== signalR.HubConnectionState.Disconnected) {
+      await activeHomeConnection.stop();
     }
+  } catch (e) {
+    console.warn('[SignalR] Error stopping old Home Hub:', e);
+  }
+
+  // 2. Clear old wraps
+  homeCallbackMap.clear();
+
+  // 3. Create fresh connection
+  activeHomeConnection = new signalR.HubConnectionBuilder()
+    .withUrl(`${baseUrl}/HomeSecurityHub`, {
+      accessTokenFactory: () => getToken() || ''
+    })
+    .withAutomaticReconnect()
+    .build();
+
+  // 4. Re-apply all registered listeners
+  // Re-register Home Hub event listeners
+  for (const { methodName, newMethod } of homeRegisteredCallbacks) {
+    if (!homeCallbackMap.has(methodName)) {
+      homeCallbackMap.set(methodName, new Map());
+    }
+    const methodMap = homeCallbackMap.get(methodName)!;
+    const wrappedMethod = (...args: any[]) => {
+      console.log(`%c[SignalR HomeHub Event: "${methodName}"]`, 'color: #0088cc; font-weight: bold; font-size: 11px', 'Response:', args[0]);
+      newMethod(...args);
+    };
+    methodMap.set(newMethod, wrappedMethod);
+    activeHomeConnection.on(methodName, wrappedMethod);
+  }
+
+  // 5. Restart connection if user is logged in
+  const token = localStorage.getItem('auth_token');
+  const verified = localStorage.getItem('auth_verified') === 'true';
+  if (token && verified) {
+    await startHomeSecurityHub();
   }
 };

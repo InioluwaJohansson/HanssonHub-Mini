@@ -86,7 +86,7 @@ export default function Logs() {
         </div>
         <button 
           onClick={handleSearch}
-          className="w-full py-2 bg-slate-900 text-white text-xs font-black uppercase tracking-widest rounded-xl hover:bg-slate-800 transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2 bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 text-zinc-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 dark:border-zinc-700 dark:text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-sm"
         >
           <Search size={14} /> Filter Activity
         </button>
@@ -105,7 +105,17 @@ export default function Logs() {
               className="border border-slate-200 p-4 bg-white rounded-xl shadow-sm hover:shadow-md hover:border-slate-300 transition-all cursor-pointer flex items-center gap-4"
               onClick={() => setSelectedLog(log)}
             >
-              <img src={log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://i.pravatar.cc/150'} alt="" className="w-12 h-12 rounded-full border-2 border-slate-100 object-cover" />
+              {(() => {
+                const imageUrl = log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
+                const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
+                return imageUrl ? (
+                  <img src={imageUrl} alt="" className="w-12 h-12 rounded-full border-2 border-slate-100 object-cover" />
+                ) : (
+                  <div className="w-12 h-12 shrink-0 rounded-full border-2 border-slate-100 bg-slate-200 flex items-center justify-center font-bold text-slate-600 text-lg uppercase">
+                    {firstName.charAt(0)}
+                  </div>
+                );
+              })()}
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-start">
                   <p className="text-sm font-bold text-slate-900 truncate">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
@@ -150,7 +160,17 @@ export default function Logs() {
             <div className="p-6">
               <div className="flex items-center gap-4 mb-6 pb-6 border-b border-slate-100">
                 <div className="relative">
-                  <img src={selectedLog.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (selectedLog as any).getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://i.pravatar.cc/150'} alt="" className="w-16 h-16 rounded-full border-2 border-slate-200 shadow-sm object-cover" />
+                  {(() => {
+                    const imageUrl = selectedLog.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (selectedLog as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
+                    const firstName = selectedLog.GetPersonDto?.GetPersonDetailsDto?.FirstName || (selectedLog as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
+                    return imageUrl ? (
+                      <img src={imageUrl} alt="" className="w-16 h-16 rounded-full border-2 border-slate-200 shadow-sm object-cover" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full border-2 border-slate-200 bg-slate-200 shadow-sm flex items-center justify-center font-bold text-slate-600 text-2xl uppercase">
+                        {firstName.charAt(0)}
+                      </div>
+                    );
+                  })()}
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-emerald-500 rounded-full border-2 border-white flex items-center justify-center">
                     <Activity size={12} className="text-white" />
                   </div>

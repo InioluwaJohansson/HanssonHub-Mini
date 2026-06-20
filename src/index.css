@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@variant dark (&:where(.dark, .dark *));
+
 ::-webkit-scrollbar {
     display: none;
 }
@@ -7,3 +9,166 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
 }
+
+/* Premium Dark Theme override mappings */
+html.dark, html.dark body, html.dark #root {
+  background-color: #09090b !important;
+  color: #f4f4f5 !important;
+}
+
+html.dark main,
+html.dark header,
+html.dark nav,
+html.dark div.bg-white,
+html.dark div.bg-slate-50,
+html.dark button.bg-white,
+html.dark div.bg-slate-100,
+html.dark div.bg-zinc-50,
+html.dark input.bg-transparent,
+html.dark div.bg-zinc-100 {
+  background-color: #18181b !important;
+  color: #f4f4f5 !important;
+  border-color: #27272a !important;
+}
+
+html.dark header {
+  border-bottom: 2px solid #27272a !important;
+  box-shadow: none !important;
+}
+
+html.dark nav {
+  border-top: 2px solid #27272a !important;
+  box-shadow: none !important;
+}
+
+html.dark p.text-slate-500,
+html.dark p.text-zinc-500,
+html.dark p.text-slate-400,
+html.dark p.text-zinc-400,
+html.dark span.text-zinc-400,
+html.dark h4.text-zinc-400,
+html.dark p.text-zinc-650,
+html.dark span.text-slate-500 {
+  color: #a1a1aa !important;
+}
+
+html.dark h1,
+html.dark h2,
+html.dark h3,
+html.dark h4,
+html.dark p.text-slate-900,
+html.dark p.text-zinc-900,
+html.dark div.text-zinc-900,
+html.dark span.text-zinc-900 {
+  color: #fafafa !important;
+}
+
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #27272a !important;
+  color: #fafafa !important;
+  border-color: #3f3f46 !important;
+}
+
+html.dark .hover\:bg-zinc-50:hover,
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-zinc-100:hover,
+html.dark .hover\:bg-slate-100:hover {
+  background-color: #27272a !important;
+}
+
+html.dark div.bg-blue-50,
+html.dark div.bg-indigo-50,
+html.dark div.bg-emerald-50,
+html.dark div.bg-teal-50,
+html.dark div.bg-purple-50 {
+  background-color: #1e1b4b !important;
+}
+
+html.dark .border-zinc-200,
+html.dark .border-slate-200,
+html.dark .border-zinc-100,
+html.dark .border-slate-100 {
+  border-color: #27272a !important;
+}
+
+/* Snapchat style keyframes */
+@keyframes snapLoading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.animate-snap-loading {
+  animation: snapLoading 1.5s infinite linear;
+}
+
+/* Advanced premium dark theme mappings */
+html.dark .bg-white {
+  background-color: #18181b !important;
+  color: #f4f4f5 !important;
+}
+html.dark .bg-zinc-50, 
+html.dark .bg-zinc-100, 
+html.dark .bg-zinc-200, 
+html.dark .bg-slate-50, 
+html.dark .bg-slate-100 {
+  background-color: #222225 !important;
+  color: #f4f4f5 !important;
+}
+html.dark .bg-zinc-150, 
+html.dark .bg-zinc-50\/50,
+html.dark .bg-zinc-100\/60 {
+  background-color: #1a1a1c !important;
+}
+html.dark .text-zinc-800,
+html.dark .text-zinc-900,
+html.dark .text-slate-900,
+html.dark .text-zinc-700,
+html.dark .text-zinc-650 {
+  color: #fafafa !important;
+}
+html.dark .text-zinc-500,
+html.dark .text-zinc-400,
+html.dark .text-slate-500,
+html.dark .text-slate-400 {
+  color: #a1a1aa !important;
+}
+html.dark .border-zinc-200,
+html.dark .border-slate-200,
+html.dark .border-zinc-100,
+html.dark .border-slate-100,
+html.dark .border-zinc-150 {
+  border-color: #2e2e33 !important;
+}
+
+/* WhatsApp / Chat Premium Dark Green User Bubble Override */
+html.dark .bg-\[\#DCF8C6\] {
+  background-color: #054740 !important;
+  border-color: #054740 !important;
+}
+html.dark .text-emerald-800\/80,
+html.dark .text-emerald-700\/70,
+html.dark .text-emerald-600 {
+  color: #34d399 !important;
+}
+html.dark .bg-\[\#DCF8C6\] p,
+html.dark .bg-\[\#DCF8C6\] span,
+html.dark .bg-\[\#DCF8C6\] .text-zinc-800,
+html.dark .bg-\[\#DCF8C6\] .text-zinc-600 {
+  color: #e6f9ed !important;
+}
+html.dark .bg-\[\#DCF8C6\] .text-emerald-800\/80,
+html.dark .bg-\[\#DCF8C6\] .text-emerald-700\/70 {
+  color: #a7f3d0 !important;
+}
+
+@keyframes snap-loading {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.animate-snap-loading {
+  animation: snap-loading 2s linear infinite;
+}
+
+

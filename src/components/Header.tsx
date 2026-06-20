@@ -2,10 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { User, LogOut, Shield, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ViewType } from './BottomNav';
+import { getUserDetails } from '../utils/api';
 
 export function Header({ onLogout, setView }: { onLogout: () => void, setView: (v: ViewType) => void }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const user = getUserDetails();
+  const name = user?.fullName || user?.FullName || user?.userName || user?.UserName || 'User';
+  const image = user?.profileImageUrl || user?.ProfileImageUrl || user?.imageUrl || user?.ImageUrl;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -27,9 +32,15 @@ export function Header({ onLogout, setView }: { onLogout: () => void, setView: (
       <div className="relative" ref={dropdownRef}>
         <button 
           onClick={() => setDropdownOpen(!dropdownOpen)}
-          className="w-8 h-8 rounded-full bg-zinc-200 overflow-hidden border border-black flex justify-center items-center focus:outline-none transition-all hover:bg-zinc-300"
+          className="w-8 h-8 rounded-full bg-[#3b82f6] text-white overflow-hidden border border-black flex justify-center items-center focus:outline-none transition-all hover:bg-blue-600 shadow-sm"
         >
-          <User size={16} className="text-zinc-800" />
+          {image ? (
+            <img src={image} alt="User profile" className="w-full h-full object-cover" />
+          ) : (
+            <span className="font-extrabold text-sm uppercase self-center tracking-tighter">
+              {name.charAt(0)}
+            </span>
+          )}
         </button>
 
         <AnimatePresence>

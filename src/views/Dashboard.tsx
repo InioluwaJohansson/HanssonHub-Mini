@@ -65,11 +65,21 @@ export default function Dashboard() {
             <div key={log.Id ?? (log as any).id ?? index} className="flex flex-col">
               <div className="bg-white p-3 rounded-xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow relative">
                 <div className="flex items-center gap-3 mb-2 pb-2 border-b border-zinc-50">
-                  <img 
-                    src={log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl || 'https://i.pravatar.cc/150'} 
-                    alt="" 
-                    className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
-                  />
+                  {(() => {
+                    const imageUrl = log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
+                    const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
+                    return imageUrl ? (
+                      <img 
+                        src={imageUrl} 
+                        alt="" 
+                        className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
+                      />
+                    ) : (
+                      <div className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 bg-slate-200 flex items-center justify-center font-bold text-slate-600 text-[10px] uppercase">
+                        {firstName.charAt(0)}
+                      </div>
+                    );
+                  })()}
                   <div className="flex-1 flex justify-between items-center">
                     <p className="font-bold text-zinc-900 text-xs">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
                     <p className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 tracking-wider uppercase">{log.ActionType || (log as any).actionType}</p>

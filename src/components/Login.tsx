@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Eye, EyeOff, User, Lock, LogIn, Shield, LoaderCircle, Fingerprint } from 'lucide-react';
-import { loginUser, saveToken, saveUserDetails } from '../utils/api';
+import { loginUser, saveToken, saveUserDetails, getAppNamesIdList, saveAppNamesList } from '../utils/api';
 import { isBiometricAvailable, registerBiometric, authenticateBiometric, getBiometricStoredToken, saveBiometricStoredToken } from '../utils/biometrics';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
@@ -31,6 +31,15 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         const t = getBiometricStoredToken();
         if (t) {
           saveToken(t);
+          
+          // Fetch App names immediately after login
+          try {
+             const appNamesData = await getAppNamesIdList();
+             if (appNamesData) {
+               saveAppNamesList(appNamesData);
+             }
+          } catch(e) { console.error("Failed to fetch app names id list"); }
+
           onLogin();
           return;
         } else {
@@ -65,6 +74,14 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                 saveBiometricStoredToken(response.token);
              }
           }
+          
+          // Fetch App names immediately after login
+          try {
+             const appNamesData = await getAppNamesIdList();
+             if (appNamesData) {
+               saveAppNamesList(appNamesData);
+             }
+          } catch(e) { console.error("Failed to fetch app names id list"); }
           
           onLogin();
         } else {

@@ -1,13 +1,25 @@
 import axios from 'axios';
 
-const BASE_URL = 'https://kv5zhpcr-7190.uks1.devtunnels.ms/Home_Security';
-//q9l0xpmb lenovo
-//kv5zhpcr dell
+export const getBaseUrl = (): string => {
+  return localStorage.getItem('api_base_url') || 'https://kv5zhpcr-7190.uks1.devtunnels.ms';
+};
+
+export const saveBaseUrl = (url: string) => {
+  const cleanUrl = url.trim().replace(/\/+$/, '');
+  localStorage.setItem('api_base_url', cleanUrl);
+};
+
 export const saveToken = (token: string) => {
   localStorage.setItem('auth_token', token);
 };
 
 export const getToken = () => {
+  const theme = localStorage.getItem('app_theme');
+  if (theme === 'dark') {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
+  }
   return localStorage.getItem('auth_token');
 };
 
@@ -20,11 +32,52 @@ export const getUserDetails = () => {
   return details ? JSON.parse(details) : null;
 };
 
+export const getAppNamesIdList = async () => {
+  const response = await api.post('/Dashboard/GetAppNamesIdList');
+  return response.data;
+};
+
+export const saveAppNamesList = (data: any) => {
+  if (data && typeof data === 'object') {
+    if ('result' in data && data.result) {
+      localStorage.setItem('app_names_list', JSON.stringify(data.result));
+      return;
+    }
+    if ('Result' in data && data.Result) {
+      localStorage.setItem('app_names_list', JSON.stringify(data.Result));
+      return;
+    }
+  }
+  localStorage.setItem('app_names_list', JSON.stringify(data));
+};
+
+export const getStoredAppNamesList = () => {
+  const data = localStorage.getItem('app_names_list');
+  if (!data) return null;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed && typeof parsed === 'object') {
+      if ('result' in parsed && parsed.result) {
+        return parsed.result;
+      }
+      if ('Result' in parsed && parsed.Result) {
+        return parsed.Result;
+      }
+    }
+    return parsed;
+  } catch (e) {
+    return null;
+  }
+};
+
 const api = axios.create({
-  baseURL: BASE_URL,
+  get baseURL() {
+    return getBaseUrl() + '/Home_Security';
+  }
 });
 
 api.interceptors.request.use((config) => {
+  config.baseURL = getBaseUrl() + '/Home_Security';
   const token = getToken();
   if (token) {
     config.headers['Authorization'] = `Bearer ${token}`;
@@ -88,6 +141,11 @@ export const changeAuthCode = async (data: any) => {
   return response.data;
 };
 
+export const refreshLoginToken = async () => {
+  const response = await api.post('/User/RefreshLoginToken');
+  return response.data;
+};
+
 export const createDirectChat = async (recipientPersonId: number) => {
   const response = await api.post(`/Chat/CreateChat?recipientPersonId=${recipientPersonId}`);
   return response.data;
@@ -136,9 +194,100 @@ export const addParticipants = async (chatId: number, personIds: number[]) => {
   return response.data;
 };
 
+export const base64ToBlob = (base64Data: string, contentType: string = '') => {
+  try {
+    const sliceSize = 1024;
+    const block = base64Data.split(";");
+    const realData = block.length > 1 ? (block[1].includes(",") ? block[1].split(",")[1] : block[1]) : base64Data;
+    
+    // Ensure realData is a valid base64 (very basic check)
+    if (!realData || realData.trim() === "") {
+      return new Blob([''], { type: contentType });
+    }
+
+    const byteCharacters = atob(realData.replace(/\s/g, ''));
+    const byteArrays = [];
+
+    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
+      const slice = byteCharacters.slice(offset, offset + sliceSize);
+
+      const byteNumbers = new Array(slice.length);
+      for (let i = 0; i < slice.length; i++) {
+        byteNumbers[i] = slice.charCodeAt(i);
+      }
+
+      const byteArray = new Uint8Array(byteNumbers);
+      byteArrays.push(byteArray);
+    }
+
+    return new Blob(byteArrays, { type: contentType });
+  } catch (err) {
+    console.error("base64ToBlob error:", err);
+    return new Blob([''], { type: contentType });
+  }
+};
+
 export const sendMessage = async (data: { chatId: number; content?: string; type: number; attachments: any[] }) => {
-  const response = await api.post('/Message/SendMessage', data);
-  return response.data;
+  if (data.attachments && data.attachments.length > 0) {
+    const formData = new FormData();
+    formData.append('ChatId', data.chatId.toString());
+    formData.append('Content', data.content || '');
+    formData.append('Type', data.type.toString());
+    formData.append('sendMessageDto.ChatId', data.chatId.toString());
+    formData.append('sendMessageDto.Content', data.content || '');
+    formData.append('sendMessageDto.Type', data.type.toString());
+
+    data.attachments.forEach((att, index) => {
+      let fileBlob: Blob;
+      if (att.filePath && typeof att.filePath === 'string' && att.filePath.startsWith('data:')) {
+        fileBlob = base64ToBlob(att.filePath, att.contentType);
+      } else if (att.filePath instanceof Blob) {
+        fileBlob = att.filePath;
+      } else {
+        fileBlob = new Blob([''], { type: att.contentType || 'application/octet-stream' });
+      }
+
+      formData.append(`sendMessageDto.Attachments[${index}].FilePath`, fileBlob, att.fileName || 'file.jpg');
+      formData.append(`sendMessageDto.Attachments[${index}].FileName`, att.fileName || '');
+      formData.append(`sendMessageDto.Attachments[${index}].ContentType`, att.contentType || '');
+      formData.append(`sendMessageDto.Attachments[${index}].FileSize`, (att.fileSize || 0).toString());
+      formData.append(`sendMessageDto.Attachments[${index}].ThumbnailPath`, att.thumbnailPath || '');
+
+      formData.append(`Attachments[${index}].FilePath`, fileBlob, att.fileName || 'file.jpg');
+      formData.append(`Attachments[${index}].FileName`, att.fileName || '');
+      formData.append(`Attachments[${index}].ContentType`, att.contentType || '');
+      formData.append(`Attachments[${index}].FileSize`, (att.fileSize || 0).toString());
+      formData.append(`Attachments[${index}].ThumbnailPath`, att.thumbnailPath || '');
+    });
+
+    const response = await api.post('/Message/SendMessage', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      }
+    });
+    return response.data;
+  } else {
+    try {
+      const response = await api.post('/Message/SendMessage', data);
+      return response.data;
+    } catch (err: any) {
+      // Fallback to Form Data if JSON is rejected with FromForm requirement
+      const formData = new FormData();
+      formData.append('ChatId', data.chatId.toString());
+      formData.append('Content', data.content || '');
+      formData.append('Type', data.type.toString());
+      formData.append('sendMessageDto.ChatId', data.chatId.toString());
+      formData.append('sendMessageDto.Content', data.content || '');
+      formData.append('sendMessageDto.Type', data.type.toString());
+      
+      const response = await api.post('/Message/SendMessage', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        }
+      });
+      return response.data;
+    }
+  }
 };
 
 export const editMessage = async (data: { messageId: number; content: string }) => {
@@ -160,3 +309,38 @@ export const getUnreadCount = async (chatId: number) => {
   const response = await api.get(`/Message/GetUnreadCount?chatId=${chatId}`);
   return response.data;
 };
+
+export const updateGroupChat = async (chatId: number, name?: string, description?: string, imageFile?: File | null) => {
+  const formData = new FormData();
+  if (imageFile) {
+    formData.append('ImageUrl', imageFile);
+  }
+  
+  const params = new URLSearchParams();
+  params.append('ChatId', chatId.toString());
+  if (name) params.append('Name', name);
+  if (description) params.append('Description', description);
+  
+  const response = await api.put(`/Chat/UpdateGroupChat?${params.toString()}`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    }
+  });
+  return response.data;
+};
+
+export const deleteChat = async (chatId: number) => {
+  const response = await api.put(`/Chat/DeleteChat?chatId=${chatId}`);
+  return response.data;
+};
+
+export const sendTypingStatus = async (chatId: number) => {
+  const response = await api.post(`/Message/Typing?chatId=${chatId}`);
+  return response.data;
+};
+
+export const joinChatRoom = async (chatId: number) => {
+  const response = await api.post(`/Chat/JoinChat?chatId=${chatId}`);
+  return response.data;
+};
+
