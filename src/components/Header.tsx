@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { User, LogOut, Shield, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ViewType } from './BottomNav';
-import { getUserDetails } from '../utils/api';
+import { getUserDetails, getImageUrl } from '../utils/api';
 
 export function Header({ onLogout, setView }: { onLogout: () => void, setView: (v: ViewType) => void }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -35,7 +35,7 @@ export function Header({ onLogout, setView }: { onLogout: () => void, setView: (
           className="w-8 h-8 rounded-full bg-[#3b82f6] text-white overflow-hidden border border-black flex justify-center items-center focus:outline-none transition-all hover:bg-blue-600 shadow-sm"
         >
           {image ? (
-            <img src={image} alt="User profile" className="w-full h-full object-cover" />
+            <img src={getImageUrl(image)} alt="User profile" className="w-full h-full object-cover" />
           ) : (
             <span className="font-extrabold text-sm uppercase self-center tracking-tighter">
               {name.charAt(0)}

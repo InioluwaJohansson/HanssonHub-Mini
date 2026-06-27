@@ -65,13 +65,18 @@ export default function App() {
 
   const notificationTimeoutRef = useRef<any>(null);
 
-  const triggerNotification = (senderName: string, messageText: string, senderPhoto: string) => {
+  const triggerNotification = (senderName: string, messageText: string, senderPhoto: string, chatId?: string) => {
     // Read notification settings
     const alertsEnabled = localStorage.getItem('alerts_enabled') !== 'false';
     if (!alertsEnabled) return;
     
-    // Only show if not on the chat page, as chat handles internally
-    if (currentViewRef.current === 'chats') return;
+    // Only suppress if we are ON the chats view AND looking at the exact same chat
+    if (currentViewRef.current === 'chats') {
+      const activeChatId = (window as any).__activeChatId;
+      if (activeChatId && chatId && activeChatId === chatId) {
+        return; // We are actively in the chat where the message was sent
+      }
+    }
 
     if (notificationTimeoutRef.current) {
       clearTimeout(notificationTimeoutRef.current);
@@ -145,8 +150,15 @@ export default function App() {
 
   // Listen to SignalR messages
   useEffect(() => {
-    const handleReceivedMessage = (rawMsg: any) => {
-      console.log("[HOME_SIGNALR_EVENT: MessageSent]", rawMsg);
+    const handleReceivedMessage = (...args: any[]) => {
+      console.log("[HOME_SIGNALR_EVENT: MessageSent/ReceiveMessage]", ...args);
+      if (args.length === 0) return;
+      
+      let rawMsg = args[0];
+      if (typeof args[0] === 'string' && args.length > 1 && typeof args[1] === 'object') {
+        rawMsg = args[1];
+      }
+      
       if (!rawMsg) return;
 
       // Unpack rawMsg if nested inside result
@@ -220,7 +232,8 @@ export default function App() {
       
       // Trigger notification if not sent by user
       if (!isMe) {
-        triggerNotification(senderName, text, finalPhoto);
+        const msgChatId = (msg.chatId || msg.ChatId)?.toString();
+        triggerNotification(senderName, text, finalPhoto, msgChatId);
       }
     };
 
@@ -235,10 +248,12 @@ export default function App() {
     };
 
     homeSecurityHubConnection.on("MessageSent", handleReceivedMessage);
+    homeSecurityHubConnection.on("ReceiveMessage", handleReceivedMessage);
     homeSecurityHubConnection.on("GetAppNamesDetails", handleGetAppNamesDetails);
     
     return () => {
       homeSecurityHubConnection.off("MessageSent", handleReceivedMessage);
+      homeSecurityHubConnection.off("ReceiveMessage", handleReceivedMessage);
       homeSecurityHubConnection.off("GetAppNamesDetails", handleGetAppNamesDetails);
     };
   }, []);

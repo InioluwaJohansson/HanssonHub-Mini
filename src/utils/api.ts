@@ -227,67 +227,63 @@ export const base64ToBlob = (base64Data: string, contentType: string = '') => {
   }
 };
 
-export const sendMessage = async (data: { chatId: number; content?: string; type: number; attachments: any[] }) => {
+const blobToBase64 = (blob: Blob): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      resolve(reader.result as string);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+export const sendMessage = async (data: { chatId: number; content?: string; type: number; attachments: any[]; replyToMessageId?: number }) => {
+  const formData = new FormData();
+  formData.append('ChatId', data.chatId.toString());
+  formData.append('Content', data.content || '');
+  formData.append('Type', data.type.toString());
+  formData.append('ReplyToMessageId', (data.replyToMessageId || 0).toString());
+
+  // Also append with prefix sendMessageDto. for maximum model binder compatibility
+  formData.append('sendMessageDto.ChatId', data.chatId.toString());
+  formData.append('sendMessageDto.Content', data.content || '');
+  formData.append('sendMessageDto.Type', data.type.toString());
+  formData.append('sendMessageDto.ReplyToMessageId', (data.replyToMessageId || 0).toString());
+
   if (data.attachments && data.attachments.length > 0) {
-    const formData = new FormData();
-    formData.append('ChatId', data.chatId.toString());
-    formData.append('Content', data.content || '');
-    formData.append('Type', data.type.toString());
-    formData.append('sendMessageDto.ChatId', data.chatId.toString());
-    formData.append('sendMessageDto.Content', data.content || '');
-    formData.append('sendMessageDto.Type', data.type.toString());
-
-    data.attachments.forEach((att, index) => {
-      let fileBlob: Blob;
-      if (att.filePath && typeof att.filePath === 'string' && att.filePath.startsWith('data:')) {
-        fileBlob = base64ToBlob(att.filePath, att.contentType);
-      } else if (att.filePath instanceof Blob) {
-        fileBlob = att.filePath;
-      } else {
-        fileBlob = new Blob([''], { type: att.contentType || 'application/octet-stream' });
-      }
-
-      formData.append(`sendMessageDto.Attachments[${index}].FilePath`, fileBlob, att.fileName || 'file.jpg');
-      formData.append(`sendMessageDto.Attachments[${index}].FileName`, att.fileName || '');
-      formData.append(`sendMessageDto.Attachments[${index}].ContentType`, att.contentType || '');
-      formData.append(`sendMessageDto.Attachments[${index}].FileSize`, (att.fileSize || 0).toString());
-      formData.append(`sendMessageDto.Attachments[${index}].ThumbnailPath`, att.thumbnailPath || '');
-
-      formData.append(`Attachments[${index}].FilePath`, fileBlob, att.fileName || 'file.jpg');
-      formData.append(`Attachments[${index}].FileName`, att.fileName || '');
-      formData.append(`Attachments[${index}].ContentType`, att.contentType || '');
-      formData.append(`Attachments[${index}].FileSize`, (att.fileSize || 0).toString());
-      formData.append(`Attachments[${index}].ThumbnailPath`, att.thumbnailPath || '');
-    });
-
-    const response = await api.post('/Message/SendMessage', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      }
-    });
-    return response.data;
-  } else {
-    try {
-      const response = await api.post('/Message/SendMessage', data);
-      return response.data;
-    } catch (err: any) {
-      // Fallback to Form Data if JSON is rejected with FromForm requirement
-      const formData = new FormData();
-      formData.append('ChatId', data.chatId.toString());
-      formData.append('Content', data.content || '');
-      formData.append('Type', data.type.toString());
-      formData.append('sendMessageDto.ChatId', data.chatId.toString());
-      formData.append('sendMessageDto.Content', data.content || '');
-      formData.append('sendMessageDto.Type', data.type.toString());
-      
-      const response = await api.post('/Message/SendMessage', formData, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
+    for (let i = 0; i < data.attachments.length; i++) {
+      const att = data.attachments[i];
+      let filePathStr = att.filePath || '';
+      if (filePathStr instanceof Blob) {
+        try {
+          filePathStr = await blobToBase64(filePathStr);
+        } catch (e) {
+          console.error("Failed to convert Blob to Base64:", e);
+          filePathStr = '';
         }
-      });
-      return response.data;
+      }
+      
+      const attObj = {
+        fileName: att.fileName || '',
+        filePath: filePathStr || '',
+        contentType: att.contentType || '',
+        fileSize: att.fileSize || 0,
+        thumbnailPath: att.thumbnailPath || ''
+      };
+      
+      const jsonStr = JSON.stringify(attObj);
+      formData.append('Attachments', jsonStr);
+      formData.append('sendMessageDto.Attachments', jsonStr);
     }
   }
+
+  const response = await api.post('/Message/SendMessage', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    }
+  });
+  return response.data;
 };
 
 export const editMessage = async (data: { messageId: number; content: string }) => {
@@ -342,5 +338,18 @@ export const sendTypingStatus = async (chatId: number) => {
 export const joinChatRoom = async (chatId: number) => {
   const response = await api.post(`/Chat/JoinChat?chatId=${chatId}`);
   return response.data;
+};
+
+export const getImageUrl = (img?: string) => {
+  if (!img) return '';
+  if (img.startsWith('data:') || img.startsWith('http://') || img.startsWith('https://')) return img;
+  
+  // Check if it's base64 encoded string but doesn't have the data prefix
+  if (/^[a-zA-Z0-9+/=]+$/.test(img) && img.length > 100) {
+    return `data:image/jpeg;base64,${img}`;
+  }
+  
+  const cleanPath = img.startsWith('/') ? img.slice(1) : img;
+  return `${getBaseUrl()}/storage/${cleanPath}`;
 };
 

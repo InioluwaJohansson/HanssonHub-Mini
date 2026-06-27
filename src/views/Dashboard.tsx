@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Camera, ShieldCheck, FileText, LayoutDashboard } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
 import { motion } from 'motion/react';
+import { getImageUrl } from '../utils/api';
 
 export default function Dashboard() {
   const { logs, fetchLogs } = useLogs();
@@ -70,7 +71,7 @@ export default function Dashboard() {
                     const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
                     return imageUrl ? (
                       <img 
-                        src={imageUrl} 
+                        src={getImageUrl(imageUrl)} 
                         alt="" 
                         className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
                       />

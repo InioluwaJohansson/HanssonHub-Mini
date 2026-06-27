@@ -9,6 +9,19 @@ let activeHomeConnection = new signalR.HubConnectionBuilder()
   .withAutomaticReconnect()
   .build();
 
+activeHomeConnection.onreconnected(async () => {
+  console.log('SignalR HomeSecurityHub Reconnected.');
+  const token = getToken();
+  if (token) {
+    try {
+      await activeHomeConnection.invoke("AddPersonRole", token);
+      console.log('[SignalR] AddPersonRole invoked on reconnect.');
+    } catch (err) {
+      console.warn('[SignalR] Failed to invoke AddPersonRole on reconnect:', err);
+    }
+  }
+});
+
 // Logging Interceptors & Registrations Map
 const homeCallbackMap = new Map<string, Map<any, any>>();
 
@@ -84,6 +97,11 @@ export const startHomeSecurityHub = async () => {
     try {
       await activeHomeConnection.start();
       console.log('SignalR HomeSecurityHub Connected.');
+      const token = getToken();
+      if (token) {
+        await activeHomeConnection.invoke("AddPersonRole", token);
+        console.log('[SignalR] AddPersonRole invoked on connect.');
+      }
     } catch (err) {
       console.log('Error connecting to HomeSecurityHub: ', err);
     }
@@ -113,6 +131,19 @@ export const rebuildHubConnections = async () => {
     })
     .withAutomaticReconnect()
     .build();
+
+  activeHomeConnection.onreconnected(async () => {
+    console.log('SignalR HomeSecurityHub Reconnected.');
+    const token = getToken();
+    if (token) {
+      try {
+        await activeHomeConnection.invoke("AddPersonRole", token);
+        console.log('[SignalR] AddPersonRole invoked on reconnect.');
+      } catch (err) {
+        console.warn('[SignalR] Failed to invoke AddPersonRole on reconnect:', err);
+      }
+    }
+  });
 
   // 4. Re-apply all registered listeners
   // Re-register Home Hub event listeners

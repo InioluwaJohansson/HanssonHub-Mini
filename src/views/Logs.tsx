@@ -3,6 +3,7 @@ import { FileText, X, Activity, Clock, Info, Calendar, Search } from 'lucide-rea
 import { GetLogDto } from '../utils/mockData';
 import { useLogs } from '../context/LogsContext';
 import { motion } from 'motion/react';
+import { getImageUrl } from '../utils/api';
 
 export default function Logs() {
   const { logs, hasMore, loading, fetchLogs, fetchLogsByDate, clearLogs } = useLogs();
@@ -109,7 +110,7 @@ export default function Logs() {
                 const imageUrl = log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
                 const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
                 return imageUrl ? (
-                  <img src={imageUrl} alt="" className="w-12 h-12 rounded-full border-2 border-slate-100 object-cover" />
+                  <img src={getImageUrl(imageUrl)} alt="" className="w-12 h-12 rounded-full border-2 border-slate-100 object-cover" />
                 ) : (
                   <div className="w-12 h-12 shrink-0 rounded-full border-2 border-slate-100 bg-slate-200 flex items-center justify-center font-bold text-slate-600 text-lg uppercase">
                     {firstName.charAt(0)}
@@ -164,7 +165,7 @@ export default function Logs() {
                     const imageUrl = selectedLog.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (selectedLog as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
                     const firstName = selectedLog.GetPersonDto?.GetPersonDetailsDto?.FirstName || (selectedLog as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
                     return imageUrl ? (
-                      <img src={imageUrl} alt="" className="w-16 h-16 rounded-full border-2 border-slate-200 shadow-sm object-cover" />
+                      <img src={getImageUrl(imageUrl)} alt="" className="w-16 h-16 rounded-full border-2 border-slate-200 shadow-sm object-cover" />
                     ) : (
                       <div className="w-16 h-16 rounded-full border-2 border-slate-200 bg-slate-200 shadow-sm flex items-center justify-center font-bold text-slate-600 text-2xl uppercase">
                         {firstName.charAt(0)}

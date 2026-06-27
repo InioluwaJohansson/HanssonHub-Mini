@@ -11,7 +11,7 @@ import {
   removeParticipant, addParticipants, sendMessage, editMessage, 
   getChatMessages, deleteMessage, getUnreadCount, getUserDetails,
   getStoredAppNamesList, updateGroupChat, deleteChat,
-  sendTypingStatus, joinChatRoom, getBaseUrl
+  sendTypingStatus, joinChatRoom, getBaseUrl, getImageUrl
 } from '../utils/api';
 import { MessageType } from '../types/chat';
 import { saveData, getData, getAllData, STORES, clearStore } from '../utils/db';
@@ -166,6 +166,7 @@ type ChatRoom = {
   participants: any[];
   imageUrl?: string;
   lastMessageSenderId?: number;
+  lastMessageSentAt?: string;
 };
 
 export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (isActive: boolean) => void, onRefreshPage?: () => void }) {
@@ -319,6 +320,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // Keep references to active States for Event Listeners
   const activeChatRef = useRef<ChatRoom | null>(null);
   useEffect(() => {
+    (window as any).__activeChatId = activeChat?.id || null;
     activeChatRef.current = activeChat;
   }, [activeChat]);
 
@@ -374,20 +376,25 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
       // 3. Update the chat sidebar & IndexedDB cache
       setLocalChatList(prevList => {
+        let updatedItem: any = null;
         const nextList = prevList.map(c => {
           if (c.id === chatIdStr) {
-            const updated = {
+            updatedItem = {
               ...c,
               lastMessage: msg.content || msg.Content || (msg.type === MessageType.Image ? 'Image' : msg.type === MessageType.Audio ? 'Voice Message' : ''),
               time: new Date(msg.sentAt || msg.SentAt || new Date()).toLocaleDateString([], { month: 'short', day: 'numeric' }),
               unread: (msg.senderPersonId || msg.SenderPersonId) === currentUid ? c.unread : c.unread + 1,
-              lastMessageSenderId: msg.senderPersonId || msg.SenderPersonId || 0
+              lastMessageSenderId: msg.senderPersonId || msg.SenderPersonId || 0,
+              lastMessageSentAt: msg.sentAt || msg.SentAt || new Date().toISOString()
             };
-            saveData(STORES.CHATS, updated).catch(() => {});
-            return updated;
+            saveData(STORES.CHATS, updatedItem).catch(() => {});
+            return updatedItem;
           }
           return c;
         });
+        if (updatedItem) {
+          return [updatedItem, ...nextList.filter(c => c.id !== chatIdStr)];
+        }
         return nextList;
       });
     };
@@ -487,7 +494,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           isGroup: chat.isGroup || chat.IsGroup || false,
           description: chat.description || chat.Description || '',
           imgUrl: chat.imageUrl || chat.ImageUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop',
-          participants: chat.participants || chat.Participants || []
+          participants: chat.participants || chat.Participants || [],
+          lastMessageSentAt: chat.lastMessage?.sentAt || chat.LastMessage?.SentAt || new Date().toISOString()
         };
         saveData(STORES.CHATS, mapped).catch(() => {});
         return [mapped, ...prev];
@@ -640,20 +648,44 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       }
     };
 
+    const extractPayload = (rawMsg: any) => {
+      if (rawMsg && typeof rawMsg === 'object') {
+        if ('result' in rawMsg && rawMsg.result) return rawMsg.result;
+        if ('Result' in rawMsg && rawMsg.Result) return rawMsg.Result;
+      }
+      return rawMsg;
+    };
+
     // Bind Hub connections
-    const handleMessageSentWrapped = (msg: any) => { console.log("[HOME_SIGNALR_EVENT: MessageSent]", msg); handleMessageSent(msg); };
-    const handleMessageEditedWrapped = (msg: any) => { console.log("[HOME_SIGNALR_EVENT: MessageEdited]", msg); handleMessageEdited(msg); };
-    const handleMessageDeletedWrapped = (msg: any) => { console.log("[HOME_SIGNALR_EVENT: MessageDeleted]", msg); handleMessageDeleted(msg); };
-    const handleUserTypingWrapped = (data: any) => { console.log("[HOME_SIGNALR_EVENT: UserTyping]", data); handleUserTyping(data); };
-    const handleChatCreatedWrapped = (chat: any) => { console.log("[HOME_SIGNALR_EVENT: ChatCreated]", chat); handleChatCreated(chat); };
-    const handleGroupChatUpdatedWrapped = (chat: any) => { console.log("[HOME_SIGNALR_EVENT: GroupChatUpdated]", chat); handleGroupChatUpdated(chat); };
-    const handleChatDeletedWrapped = (chatId: number) => { console.log("[HOME_SIGNALR_EVENT: ChatDeleted]", chatId); handleChatDeleted(chatId); };
-    const handleParticipantsAddedWrapped = (data: any) => { console.log("[HOME_SIGNALR_EVENT: ParticipantsAdded]", data); handleParticipantsAdded(data); };
-    const handleParticipantRemovedWrapped = (data: any) => { console.log("[HOME_SIGNALR_EVENT: ParticipantRemoved]", data); handleParticipantRemoved(data); };
-    const handleMessagesReadWrapped = (data: any) => { console.log("[HOME_SIGNALR_EVENT: MessagesRead]", data); handleMessagesRead(data); };
-    const handleUserOnlineWrapped = (data: any) => {
-      console.log("[HOME_SIGNALR_EVENT: UserOnline]", data);
-      const personId = Number(data);
+    const handleMessageSentWrapped = (...args: any[]) => { 
+      console.log("[HOME_SIGNALR_EVENT: MessageSent]", ...args); 
+      // If backend sends (user, message), the message is usually the object
+      let msg = args[0];
+      if (typeof args[0] === 'string' && args.length > 1 && typeof args[1] === 'object') {
+        msg = args[1];
+      }
+      handleMessageSent(extractPayload(msg)); 
+    };
+    const handleReceiveMessageWrapped = (...args: any[]) => { 
+      console.log("[HOME_SIGNALR_EVENT: ReceiveMessage]", ...args); 
+      let msg = args[0];
+      if (typeof args[0] === 'string' && args.length > 1 && typeof args[1] === 'object') {
+        msg = args[1];
+      }
+      handleMessageSent(extractPayload(msg)); 
+    };
+    const handleMessageEditedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessageEdited]", ...args); handleMessageEdited(extractPayload(args[0])); };
+    const handleMessageDeletedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessageDeleted]", ...args); handleMessageDeleted(extractPayload(args[0])); };
+    const handleUserTypingWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: UserTyping]", ...args); handleUserTyping(extractPayload(args[0])); };
+    const handleChatCreatedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ChatCreated]", ...args); handleChatCreated(extractPayload(args[0])); };
+    const handleGroupChatUpdatedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: GroupChatUpdated]", ...args); handleGroupChatUpdated(extractPayload(args[0])); };
+    const handleChatDeletedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ChatDeleted]", ...args); handleChatDeleted(extractPayload(args[0])); };
+    const handleParticipantsAddedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ParticipantsAdded]", ...args); handleParticipantsAdded(extractPayload(args[0])); };
+    const handleParticipantRemovedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ParticipantRemoved]", ...args); handleParticipantRemoved(extractPayload(args[0])); };
+    const handleMessagesReadWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessagesRead]", ...args); handleMessagesRead(extractPayload(args[0])); };
+    const handleUserOnlineWrapped = (...args: any[]) => {
+      console.log("[HOME_SIGNALR_EVENT: UserOnline]", ...args);
+      const personId = Number(extractPayload(args[0]));
       if (!isNaN(personId)) {
         setOnlineUsers(prev => {
           const next = new Set(prev);
@@ -664,6 +696,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     };
 
     homeSecurityHubConnection.on("MessageSent", handleMessageSentWrapped);
+    homeSecurityHubConnection.on("ReceiveMessage", handleReceiveMessageWrapped);
     homeSecurityHubConnection.on("MessageEdited", handleMessageEditedWrapped);
     homeSecurityHubConnection.on("MessageDeleted", handleMessageDeletedWrapped);
     homeSecurityHubConnection.on("UserTyping", handleUserTypingWrapped);
@@ -678,6 +711,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
     return () => {
       homeSecurityHubConnection.off("MessageSent", handleMessageSentWrapped);
+      homeSecurityHubConnection.off("ReceiveMessage", handleReceiveMessageWrapped);
       homeSecurityHubConnection.off("MessageEdited", handleMessageEditedWrapped);
       homeSecurityHubConnection.off("MessageDeleted", handleMessageDeletedWrapped);
       homeSecurityHubConnection.off("UserTyping", handleUserTypingWrapped);
@@ -831,7 +865,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             description: chat.description || '',
             participants: chat.participants || [],
             imageUrl: chat.imageUrl || chat.ImageUrl || chat.imgUrl || chat.ImgUrl || '',
-            lastMessageSenderId: chat.lastMessage ? (chat.lastMessage.senderPersonId || chat.lastMessage.SenderPersonId || 0) : 0
+            lastMessageSenderId: chat.lastMessage ? (chat.lastMessage.senderPersonId || chat.lastMessage.SenderPersonId || 0) : 0,
+            lastMessageSentAt: chat.lastMessage?.sentAt || chat.createdAt || chat.CreatedAt || new Date().toISOString()
           };
         });
         
@@ -862,15 +897,11 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
         return mapped;
       }
     } catch (err) {
-      console.error("Failed to load real chats, using mock fallback list", err);
-      // Resilience Fallback to avoid complete empty blackouts
-      const fallbackList = [
-        { id: '1', name: 'Security Control Team', lastMessage: 'All parameters are currently secure.', time: '10:42 AM', unread: 2, isGroup: true, description: 'Direct communications for the onsite team', participants: [{ personId: 101, fullName: 'Super Admin', isAdmin: true, isOnline: true }] },
-        { id: '2', name: 'Operator Hansson', lastMessage: 'Did you make sure to lock the backdoor?', time: 'Yesterday', unread: 0, isGroup: false, description: 'Direct chat', participants: [{ personId: 102, fullName: 'Operator Hansson', isAdmin: false, isOnline: false }] },
-        { id: '3', name: 'Automatic Alerts Node', lastMessage: 'Internal system firmware update successful.', time: 'Mar 10', unread: 0, isGroup: false, description: 'Notifications bot', participants: [] }
-      ];
-      setLocalChatList(fallbackList);
-      return fallbackList;
+      console.error("Failed to load real chats", err);
+      if (!silent) {
+        setLocalChatList([]);
+      }
+      return [];
     } finally {
       setIsChatsLoading(false);
     }
@@ -1022,6 +1053,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   const handleSendMessage = async () => {
     if (!messageText.trim() || !activeChat) return;
     const txt = messageText;
+    const currentReplyTo = replyTo;
     setMessageText('');
     setReplyTo(null);
 
@@ -1030,7 +1062,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
         chatId: parseInt(activeChat.id),
         content: txt,
         type: MessageType.Text,
-        attachments: []
+        attachments: [],
+        replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0
       };
       
       const res = await sendMessage(payload);
@@ -1343,20 +1376,6 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     }
   };
 
-  // Resolve standard storage URLs for all image assets in the application
-  const getImageUrl = (img?: string) => {
-    if (!img) return '';
-    if (img.startsWith('data:') || img.startsWith('http://') || img.startsWith('https://')) return img;
-    
-    // Check if it's base64 encoded string but doesn't have the data prefix
-    if (/^[a-zA-Z0-9+/=]+$/.test(img) && img.length > 100) {
-      return `data:image/jpeg;base64,${img}`;
-    }
-    
-    const cleanPath = img.startsWith('/') ? img.slice(1) : img;
-    return `${getBaseUrl()}/storage/${cleanPath}`;
-  };
-
   // Click handler to scroll to and highlight a referenced reply message for 3 seconds
   const handleReplyClick = (referencedId: string) => {
     const el = document.getElementById(`msg-${referencedId}`);
@@ -1582,6 +1601,39 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     } finally {
       setShowForwardDialog(false);
       setMessageToForward(null);
+    }
+  };
+
+  const handleRedirectToUserDirectChat = async (pId: number, pName: string) => {
+    if (pId === currentUserId) return; // Don't chat with oneself
+    setShowChatInfo(false); // Close the chat info modal
+    
+    // Check if there is already an existing direct chat with this user
+    const existingDirectChat = localChatList.find(c => !c.isGroup && c.participants.some(p => (p.personId || p.PersonId) === pId));
+    if (existingDirectChat) {
+      setActiveChat(existingDirectChat);
+      return;
+    }
+
+    // Otherwise, create a new direct chat
+    try {
+      const res = await createDirectChat(pId);
+      console.log('CreateDirectChatDto Success via Redirect:', res);
+      
+      const chats = await fetchChats();
+      const newChat = chats?.find((c: any) => c.id === res.id?.toString() || c.id === res.Id?.toString()) 
+         || {
+           id: res.id?.toString() ?? res.Id?.toString(),
+           name: res.name || res.Name || pName,
+           lastMessage: '',
+           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+           unread: 0,
+           isGroup: false,
+           participants: res.participants || res.Participants || []
+         };
+      setActiveChat(newChat);
+    } catch (err) {
+      console.error("Failed to redirect or create direct chat:", err);
     }
   };
 
@@ -1812,12 +1864,19 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   <LoaderCircle className="animate-spin text-black" size={32} />
                   <p className="text-xs font-bold uppercase tracking-wider">Syncing Secure Chats...</p>
                 </div>
+              ) : localChatList.length === 0 ? (
+                <div className="text-center py-20 px-6 text-zinc-500 text-sm font-medium leading-relaxed max-w-sm mx-auto">
+                  No chats initiated yet. Create a group chat or message another user to start a chat
+                </div>
               ) : localChatList.filter(chat => chat.name.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 ? (
-                <div className="text-center py-20 text-zinc-444 text-sm font-semibold">
-                  No active safe chat rooms found.
+                <div className="text-center py-20 text-zinc-400 text-sm font-medium">
+                  No matching chat rooms found.
                 </div>
               ) : (
-                [...localChatList].filter(chat => chat.name.toLowerCase().includes(searchQuery.toLowerCase())).reverse().map(chat => (
+                [...localChatList]
+                  .filter(chat => chat.name.toLowerCase().includes(searchQuery.toLowerCase()))
+                  .sort((a, b) => new Date(b.lastMessageSentAt || 0).getTime() - new Date(a.lastMessageSentAt || 0).getTime())
+                  .map(chat => (
                   <div 
                     key={chat.id} 
                     onClick={async () => {
@@ -1849,15 +1908,47 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     className="flex items-start gap-4 p-4 border-b border-zinc-100 hover:bg-zinc-50 cursor-pointer transition-colors active:bg-zinc-100"
                   >
                     <div className="w-10 h-10 bg-zinc-100 flex-shrink-0 flex items-center justify-center border border-black rounded-full text-black overflow-hidden">
-                      {chat.imageUrl ? (
-                        <img src={getImageUrl(chat.imageUrl)} alt={chat.name} className="w-full h-full object-cover" />
-                      ) : (
-                        chat.isGroup ? <Users size={20} /> : <span className="font-extrabold text-sm">{chat.name.charAt(0).toUpperCase()}</span>
-                      )}
+                      {(() => {
+                        if (chat.isGroup) {
+                          return chat.imageUrl ? (
+                            <img src={getImageUrl(chat.imageUrl)} alt={chat.name} className="w-full h-full object-cover" />
+                          ) : (
+                            <Users size={20} />
+                          );
+                        } else {
+                          const partner = chat.participants?.find((p: any) => {
+                            const pId = p.personId || p.PersonId || p.id || p.Id;
+                            return Number(pId) !== Number(currentUserId);
+                          });
+                          const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                          const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                          const partnerName = personDetails?.name || personDetails?.Name || chat.name;
+                          return partnerImg ? (
+                            <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="font-extrabold text-sm">{partnerName.charAt(0).toUpperCase()}</span>
+                          );
+                        }
+                      })()}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-1">
-                        <h3 className="font-bold text-zinc-800 text-sm truncate pr-2">{chat.name}</h3>
+                        <h3 className="font-bold text-zinc-800 text-sm truncate pr-2">
+                          {(() => {
+                            if (chat.isGroup) {
+                              return chat.name;
+                            } else {
+                              const partner = chat.participants?.find((p: any) => {
+                                const pId = p.personId || p.PersonId || p.id || p.Id;
+                                return Number(pId) !== Number(currentUserId);
+                              });
+                              const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                              const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                              return personDetails?.name || personDetails?.Name || chat.name;
+                            }
+                          })()}
+                        </h3>
                         <span className={`text-[10px] shrink-0 ${(chat.unread > 0 && chat.lastMessageSenderId !== currentUserId) ? 'text-green-600 font-bold' : 'text-zinc-400'}`}>
                           {chat.time}
                         </span>
@@ -1918,13 +2009,46 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   <ChevronLeft size={20} />
                 </button>
                 <div className="w-10 h-10 bg-zinc-100 border border-black flex items-center justify-center shrink-0 mr-3 rounded-full text-black overflow-hidden relative">
-                   {activeChat.imageUrl ? 
-                     <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" /> :
-                     (activeChat.isGroup ? <Users size={20} /> : <span className="font-extrabold text-sm">{activeChat.name.charAt(0).toUpperCase()}</span>)
-                   }
+                   {(() => {
+                     if (activeChat.isGroup) {
+                       return activeChat.imageUrl ? (
+                         <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" />
+                       ) : (
+                         <Users size={20} />
+                       );
+                     } else {
+                       const partner = activeChat.participants?.find((p: any) => {
+                         const pId = p.personId || p.PersonId || p.id || p.Id;
+                         return Number(pId) !== Number(currentUserId);
+                       });
+                       const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                       const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                       const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                       const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
+                       return partnerImg ? (
+                         <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                       ) : (
+                         <span className="font-extrabold text-sm">{partnerName.charAt(0).toUpperCase()}</span>
+                       );
+                     }
+                   })()}
                 </div>
                 <div>
-                  <h3 className="font-bold text-zinc-800 text-sm tracking-wide">{activeChat.name}</h3>
+                  <h3 className="font-bold text-zinc-800 text-sm tracking-wide">
+                    {(() => {
+                      if (activeChat.isGroup) {
+                        return activeChat.name;
+                      } else {
+                        const partner = activeChat.participants?.find((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          return Number(pId) !== Number(currentUserId);
+                        });
+                        const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                        return personDetails?.name || personDetails?.Name || activeChat.name;
+                      }
+                    })()}
+                  </h3>
                   {!activeChat.isGroup ? (
                     <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span> Online</p>
                   ) : (
@@ -2080,10 +2204,6 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     )}
 
                     <div className={`flex justify-between items-center gap-4 mt-1.5 w-full ${msg.isMe ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
-                    {/* Edit/Delete removed from bubble - only in long-press menu */}
-                    {!msg.isMe && (
-                      <button onClick={() => setReplyTo({ id: msg.id, text: msg.text || 'Voice Message' })} className="text-[9px] hover:underline uppercase font-bold">Reply</button>
-                    )}
                       
                       <div className="flex items-center gap-1 ml-auto shrink-0 whitespace-nowrap">
                         <p className="text-[9px] font-semibold uppercase shrink-0 whitespace-nowrap">{msg.time}</p>
@@ -2398,12 +2518,45 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       ) : (
                         <div className="flex flex-col items-center">
                           <div className="w-20 h-20 bg-indigo-50 border-2 border-indigo-200 rounded-full flex items-center justify-center text-indigo-600 mb-3 text-4xl font-extrabold shadow-sm select-none overflow-hidden relative">
-                            {activeChat.imageUrl ? 
-                              <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" /> :
-                              activeChat.name.charAt(0).toUpperCase()
-                            }
+                            {(() => {
+                              if (activeChat.isGroup) {
+                                return activeChat.imageUrl ? (
+                                  <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  activeChat.name.charAt(0).toUpperCase()
+                                );
+                              } else {
+                                const partner = activeChat.participants?.find((p: any) => {
+                                  const pId = p.personId || p.PersonId || p.id || p.Id;
+                                  return Number(pId) !== Number(currentUserId);
+                                });
+                                const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                                const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                                const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                                const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
+                                return partnerImg ? (
+                                  <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                                ) : (
+                                  partnerName.charAt(0).toUpperCase()
+                                );
+                              }
+                            })()}
                           </div>
-                          <h3 className="font-bold text-lg text-zinc-800 tracking-tight">{activeChat.name}</h3>
+                          <h3 className="font-bold text-lg text-zinc-800 tracking-tight">
+                            {(() => {
+                              if (activeChat.isGroup) {
+                                return activeChat.name;
+                              } else {
+                                const partner = activeChat.participants?.find((p: any) => {
+                                  const pId = p.personId || p.PersonId || p.id || p.Id;
+                                  return Number(pId) !== Number(currentUserId);
+                                });
+                                const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                                const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                                return personDetails?.name || personDetails?.Name || activeChat.name;
+                              }
+                            })()}
+                          </h3>
                           {activeChat.isGroup && (
                             <p className="text-xs text-zinc-500 mt-1 max-w-[240px] italic text-center">{activeChat.description || "No description set for this group chat"}</p>
                           )}
@@ -2445,54 +2598,55 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                         </div>
                       )}
                     </div>
-
-                    {/* Members List */}
+                                       {/* Members List */}
                     {activeChat.isGroup && (
                       <div className="flex-1 overflow-y-auto flex flex-col">
                         <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 flex items-center justify-between">
                           <span>Members ({activeChat.participants.length})</span>
                         </h4>
 
-                        <div className="flex flex-col gap-2 mb-6">
-                            <h5 className="text-[10px] font-black uppercase text-zinc-400 border-b pb-1 mb-1">Available to Add</h5>
-                            <div className="max-h-40 overflow-y-auto flex flex-col gap-2 p-1">
-                                {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).map(person => {
-                                  const pId = person.id || person.Id;
-                                  const pName = person.name || person.Name || `User #${pId}`;
-                                  const isSelected = selectedToAdd.includes(pId);
-                                  return (
-                                    <div 
-                                      key={pId} 
-                                      onClick={() => setSelectedToAdd(prev => prev.includes(pId) ? prev.filter(x => x !== pId) : [...prev, pId])}
-                                      className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-100 hover:border-zinc-350 transition-colors cursor-pointer select-none"
-                                    >
-                                        <div className="flex items-center gap-2">
-                                            <div className="w-8 h-8 rounded-full bg-zinc-200 flex items-center justify-center font-bold text-xs text-zinc-700">
-                                                {pName.charAt(0).toUpperCase()}
-                                            </div>
-                                            <span className="text-xs font-bold text-zinc-800">{pName}</span>
-                                        </div>
-                                        <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-zinc-300 bg-white'}`}>
-                                          {isSelected && <Check size={12} strokeWidth={3} />}
-                                        </div>
-                                    </div>
-                                  );
-                                })}
-                                {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).length === 0 && (
-                                  <p className="text-xs text-zinc-400 text-center py-2">All available users are already in this group.</p>
-                                )}
-                            </div>
-                            {selectedToAdd.length > 0 && (
-                               <button
-                                 onClick={() => handleAddParticipantsList(selectedToAdd)}
-                                 disabled={isManagingParticipants}
-                                 className="w-full mt-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                               >
-                                 {isManagingParticipants ? <LoaderCircle className="animate-spin" size={12} /> : <Plus size={14} />}
-                                 Add {selectedToAdd.length} Selected Participant{selectedToAdd.length > 1 ? 's' : ''}
-                               </button>
-                            )}
-                        </div>
+                        {isEditingGroupChat && (
+                          <div className="flex flex-col gap-2 mb-6">
+                              <h5 className="text-[10px] font-black uppercase text-zinc-400 border-b pb-1 mb-1">Available to Add</h5>
+                              <div className="max-h-40 overflow-y-auto flex flex-col gap-2 p-1">
+                                  {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).map(person => {
+                                    const pId = person.id || person.Id;
+                                    const pName = person.name || person.Name || `User #${pId}`;
+                                    const isSelected = selectedToAdd.includes(pId);
+                                    return (
+                                      <div 
+                                        key={pId} 
+                                        onClick={() => setSelectedToAdd(prev => prev.includes(pId) ? prev.filter(x => x !== pId) : [...prev, pId])}
+                                        className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-100 hover:border-zinc-350 transition-colors cursor-pointer select-none"
+                                      >
+                                          <div className="flex items-center gap-2">
+                                              <div className="w-8 h-8 rounded-full bg-zinc-200 flex items-center justify-center font-bold text-xs text-zinc-700">
+                                                  {pName.charAt(0).toUpperCase()}
+                                              </div>
+                                              <span className="text-xs font-bold text-zinc-800">{pName}</span>
+                                          </div>
+                                          <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${isSelected ? 'bg-indigo-600 border-indigo-600 text-white' : 'border-zinc-300 bg-white'}`}>
+                                            {isSelected && <Check size={12} strokeWidth={3} />}
+                                          </div>
+                                      </div>
+                                    );
+                                  })}
+                                  {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).length === 0 && (
+                                    <p className="text-xs text-zinc-400 text-center py-2">All available users are already in this group.</p>
+                                  )}
+                              </div>
+                              {selectedToAdd.length > 0 && (
+                                 <button
+                                   onClick={() => handleAddParticipantsList(selectedToAdd)}
+                                   disabled={isManagingParticipants}
+                                   className="w-full mt-2 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold uppercase tracking-wider rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                 >
+                                   {isManagingParticipants ? <LoaderCircle className="animate-spin" size={12} /> : <Plus size={14} />}
+                                   Add {selectedToAdd.length} Selected Participant{selectedToAdd.length > 1 ? 's' : ''}
+                                 </button>
+                              )}
+                          </div>
+                        )}
 
                         <div className="flex flex-col gap-2">
                           {activeChat.participants && activeChat.participants.length > 0 ? (
@@ -2513,7 +2667,17 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                 const onlineStatus = (Number(pId) === Number(currentUserId)) || onlineUsers.has(Number(pId)) || !!(p.isOnline ?? p.IsOnline);
 
                                 return (
-                                  <div key={pId} className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-50 transition-colors border border-transparent hover:border-zinc-100">
+                                  <div 
+                                    key={pId} 
+                                    onClick={() => {
+                                      if (!isEditingGroupChat && pId !== currentUserId) {
+                                        handleRedirectToUserDirectChat(Number(pId), fName);
+                                      }
+                                    }}
+                                    className={`flex items-center justify-between p-2 rounded-lg transition-colors border border-transparent ${
+                                      (!isEditingGroupChat && pId !== currentUserId) ? 'cursor-pointer hover:bg-zinc-50 hover:border-zinc-100' : ''
+                                    }`}
+                                  >
                                     <div className="flex items-center gap-2">
                                       <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-zinc-700 font-bold text-xs overflow-hidden">
                                         {pImg ? (
@@ -2533,14 +2697,19 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                       </div>
                                     </div>
 
-                                  <button 
-                                    onClick={() => handleRemoveParticipant(pId)}
-                                    disabled={isManagingParticipants}
-                                    className="p-1 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded transition-all"
-                                    title="Remove Participant"
-                                  >
-                                    <UserMinus size={14} />
-                                  </button>
+                                  {isEditingGroupChat && (
+                                    <button 
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveParticipant(pId);
+                                      }}
+                                      disabled={isManagingParticipants}
+                                      className="p-1 hover:bg-red-50 text-zinc-400 hover:text-red-500 rounded transition-all"
+                                      title="Remove Participant"
+                                    >
+                                      <UserMinus size={14} />
+                                    </button>
+                                  )}
                                 </div>
                               );
                             })
@@ -2928,7 +3097,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setOverlayMessageId(null)}
-            className="fixed inset-0 bg-zinc-950/45 backdrop-blur-lg z-[150] select-none cursor-default"
+            className="fixed inset-0 bg-zinc-950/45 backdrop-blur-md z-[150] select-none cursor-default"
           >
             {/* Highlighted Message Display in exactly same screen position */}
             {pressedMessageRect && (
@@ -2964,7 +3133,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 
                 {overlayMsg.type === 'image' && (overlayMsg.mediaUrl || overlayMsg.attachments?.length > 0) && (
                   <div className="flex flex-col gap-1">
-                    <img src={overlayMsg.mediaUrl || overlayMsg.attachments[0].fileUrl || overlayMsg.attachments[0].filePath} alt="attachment" className="rounded-sm max-h-48 object-cover max-w-full" referrerPolicy="no-referrer" />
+                    <img src={overlayMsg.mediaUrl || (overlayMsg.attachments && overlayMsg.attachments[0]?.fileUrl) || (overlayMsg.attachments && overlayMsg.attachments[0]?.filePath)} alt="attachment" className="rounded-sm max-h-48 object-cover max-w-full" referrerPolicy="no-referrer" />
                     {overlayMsg.text && <p className="text-xs text-zinc-800 dark:text-zinc-200 pt-1">{overlayMsg.text}</p>}
                   </div>
                 )}
@@ -3095,6 +3264,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           </motion.div>
         )}
       </AnimatePresence>
+
       <AnimatePresence>
         {showForwardDialog && (
           <motion.div 
