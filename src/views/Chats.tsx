@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, ChangeEvent } from 'react';
+import React, { useState, useEffect, useRef, useMemo, ChangeEvent } from 'react';
 import { 
   Search, ChevronLeft, Send, User, MessageCircle, Mic, Paperclip, X, 
   Play, Pause, Square, Users, MessageSquarePlus, CheckCheck, UserPlus, 
   CirclePlus, LoaderCircle, Trash2, Edit2, Info, Plus, UserMinus,
-  Reply, Forward, Copy, Check, Lock, Calendar, AlertCircle, Repeat
+  Reply, Forward, Copy, Check, Lock, Calendar, AlertCircle, Repeat,
+  FileText, Download, Image, ChevronDown, Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -16,7 +17,25 @@ import {
 import { MessageType } from '../types/chat';
 import { saveData, getData, getAllData, STORES, clearStore } from '../utils/db';
 import { homeSecurityHubConnection, startHomeSecurityHub } from '../utils/signalr';
+import { playNotificationSound, pauseAllAudio, setCurrentlyPlaying } from '../utils/audio';
 import Cropper from 'react-easy-crop';
+
+// Helper to trigger haptic feedback
+const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'incoming' = 'light') => {
+  if (typeof navigator !== 'undefined' && navigator.vibrate) {
+    try {
+      if (type === 'incoming') {
+        navigator.vibrate([100, 50, 100]); // Two distinct pulses
+      } else if (type === 'heavy') {
+        navigator.vibrate([50, 30, 50]);
+      } else if (type === 'medium') {
+        navigator.vibrate(30);
+      } else {
+        navigator.vibrate(15);
+      }
+    } catch (e) {}
+  }
+};
 
 // Helper to convert cropped image
 const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<File> => {
@@ -75,19 +94,30 @@ function VoicePlayer({ mediaUrl, duration }: { mediaUrl?: string; duration?: num
         if (intervalRef.current) clearInterval(intervalRef.current);
       };
 
+      const handlePause = () => {
+        setIsPlaying(false);
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+      };
+
       audio.addEventListener('loadedmetadata', handleLoadedMetadata);
       audio.addEventListener('ended', handleEnded);
+      audio.addEventListener('pause', handlePause);
 
       return () => {
         audio.pause();
         audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
         audio.removeEventListener('ended', handleEnded);
+        audio.removeEventListener('pause', handlePause);
         if (intervalRef.current) clearInterval(intervalRef.current);
       };
     }
   }, [mediaUrl]);
 
   const handlePlayPause = () => {
+    triggerHaptic('light');
     if (isPlaying) {
       if (audioRef.current) {
         audioRef.current.pause();
@@ -98,6 +128,8 @@ function VoicePlayer({ mediaUrl, duration }: { mediaUrl?: string; duration?: num
         intervalRef.current = null;
       }
     } else {
+      pauseAllAudio();
+      setCurrentlyPlaying(audioRef.current);
       setIsPlaying(true);
       if (audioRef.current) {
         audioRef.current.play().catch(e => {
@@ -131,7 +163,7 @@ function VoicePlayer({ mediaUrl, duration }: { mediaUrl?: string; duration?: num
     <div className="flex items-center gap-3 w-52 bg-zinc-100/80 border border-zinc-200/50 rounded-2xl p-1.5 pr-4 shadow-sm select-none">
       <button 
         onClick={handlePlayPause}
-        className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 flex items-center justify-center text-white shrink-0 transition-all shadow-sm"
+        className="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 flex items-center justify-center text-white shrink-0 transition-all shadow-sm cursor-pointer"
       >
         {isPlaying ? <Pause size={14} fill="currentColor" /> : <Play size={14} className="ml-0.5" fill="currentColor" />}
       </button>
@@ -155,6 +187,476 @@ function VoicePlayer({ mediaUrl, duration }: { mediaUrl?: string; duration?: num
   );
 }
 
+const getDescriptiveLastMessage = (msg: any): string => {
+  if (!msg) return "";
+  const content = msg.content || msg.Content;
+  if (content && content.trim() !== "") {
+    return content;
+  }
+  
+  const attachments = msg.attachments || msg.Attachments || [];
+  if (attachments.length === 0) {
+    const type = msg.type !== undefined ? msg.type : msg.Type;
+    if (type === 'audio' || type === MessageType.Audio) return "🎤 Voice Note";
+    if (type === 'image' || type === MessageType.Image) return "📷 Image";
+    if (type === 'video' || type === MessageType.Video) return "🎥 Video";
+    return "No messages yet";
+  }
+
+  // Count types
+  let imgCount = 0;
+  let vidCount = 0;
+  let audCount = 0;
+  let fileCount = 0;
+  let firstFileName = "";
+
+  attachments.forEach((att: any) => {
+    const type = att.type !== undefined ? att.type : att.Type;
+    const contentType = (att.contentType || att.ContentType || "").toLowerCase();
+    const fileName = att.fileName || att.FileName || "";
+    const fileNameLower = fileName.toLowerCase();
+    
+    const isImg = type === MessageType.Image || type === 'image' || contentType.includes('image') || fileNameLower.match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/);
+    const isVid = type === MessageType.Video || type === 'video' || contentType.includes('video') || fileNameLower.match(/\.(mp4|webm|ogg|mov|avi|mkv)$/);
+    const isAud = type === MessageType.Audio || type === 'audio' || contentType.includes('audio') || fileNameLower.match(/\.(mp3|wav|ogg|m4a|aac|flac)$/);
+
+    if (isImg) {
+      imgCount++;
+    } else if (isVid) {
+      vidCount++;
+    } else if (isAud) {
+      audCount++;
+    } else {
+      fileCount++;
+      if (!firstFileName) {
+        firstFileName = fileName;
+      }
+    }
+  });
+
+  // If there's only 1 attachment in total
+  if (attachments.length === 1) {
+    if (imgCount === 1) return "📷 Image";
+    if (vidCount === 1) return "🎥 Video";
+    if (audCount === 1) return "🎤 Voice Note";
+    const name = attachments[0].fileName || attachments[0].FileName || firstFileName || "File";
+    return `📎 ${name}`;
+  }
+
+  // If there are multiple attachments
+  if (imgCount > 0 && vidCount === 0 && audCount === 0 && fileCount === 0) {
+    return `📷 ${imgCount} images`;
+  }
+  if (vidCount > 0 && imgCount === 0 && audCount === 0 && fileCount === 0) {
+    return `🎥 ${vidCount} videos`;
+  }
+  if (audCount > 0 && imgCount === 0 && vidCount === 0 && fileCount === 0) {
+    return `🎤 ${audCount} voice notes`;
+  }
+  if (fileCount > 0 && imgCount === 0 && vidCount === 0 && audCount === 0) {
+    return `📎 (${fileCount} files)`;
+  }
+
+  // Mixed attachments, prioritize listing or summary
+  const total = attachments.length;
+  if (vidCount > 0) {
+    return `🎥 ${vidCount} video${vidCount > 1 ? 's' : ''}`;
+  }
+  if (imgCount > 0) {
+    return `📷 ${imgCount} image${imgCount > 1 ? 's' : ''}`;
+  }
+  if (fileCount > 0) {
+    return `📎 ${fileCount} file${fileCount > 1 ? 's' : ''}`;
+  }
+  return `📎 ${total} files`;
+};
+
+function AudioAttachmentPlayer({ mediaUrl, fileName, fileSize, isMe = false }: { mediaUrl?: string; fileName?: string; fileSize?: number; isMe?: boolean }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto download voice notes so they are ready on play
+  useEffect(() => {
+    if (!mediaUrl) return;
+    const audio = new Audio(mediaUrl);
+    audio.preload = "auto";
+    audio.load(); // Fetch immediately
+    audioRef.current = audio;
+
+    const handleLoadedMetadata = () => {
+      if (audio.duration && !isNaN(audio.duration) && isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    const handlePause = () => {
+      setIsPlaying(false);
+    };
+
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('pause', handlePause);
+
+    if (audio.readyState >= 1) {
+      setDuration(audio.duration);
+    }
+
+    return () => {
+      audio.pause();
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('pause', handlePause);
+    };
+  }, [mediaUrl]);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      pauseAllAudio();
+      setCurrentlyPlaying(audioRef.current);
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => {
+        console.error("Audio play failed:", err);
+      });
+    }
+  };
+
+  const toggleSpeed = () => {
+    const nextSpeed = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    setPlaybackRate(nextSpeed);
+    if (audioRef.current) audioRef.current.playbackRate = nextSpeed;
+  };
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!audioRef.current || !progressBarRef.current || !duration) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = rect.width;
+    const clickPercent = Math.max(0, Math.min(1, clickX / width));
+    const newTime = clickPercent * duration;
+    audioRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const formatTime = (timeSecs: number) => {
+    if (isNaN(timeSecs) || !isFinite(timeSecs)) return "0:00";
+    const mins = Math.floor(timeSecs / 60);
+    const secs = Math.floor(timeSecs % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Coherent WhatsApp style waveform blocks/frequency bars
+  // Coherent WhatsApp style waveform blocks/frequency bars
+  const bars = useMemo(() => {
+    const seed = mediaUrl || fileName || "voice_note_seed";
+    const count = 28; // Standard WhatsApp number of blocks to prevent shrinking to 0px
+    const result: number[] = [];
+    let h = 0;
+    for (let i = 0; i < seed.length; i++) {
+      h = (h << 5) - h + seed.charCodeAt(i);
+      h |= 0;
+    }
+    for (let i = 0; i < count; i++) {
+      // Deterministic pseudo-random heights coherent with this voice note
+      const pseudoRandom = Math.abs(Math.sin(h + i * 17)) * 75 + 25; // 25% to 100%
+      result.push(Math.round(pseudoRandom));
+    }
+    return result;
+  }, [mediaUrl, fileName]);
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="w-full max-w-[320px] bg-transparent flex items-center gap-3 select-none">
+      <button
+        onClick={togglePlay}
+        className="w-9 h-9 rounded-full bg-[#00a884] hover:bg-[#008f70] active:scale-95 flex items-center justify-center text-white shrink-0 transition-all shadow-md cursor-pointer"
+        title={isPlaying ? "Pause" : "Play"}
+      >
+        {isPlaying ? (
+          <Pause size={14} fill="currentColor" />
+        ) : (
+          <Play size={14} className="ml-0.5" fill="currentColor" />
+        )}
+      </button>
+
+      {/* Center: Waveform Slider and Times display */}
+      <div className="flex-1 flex flex-col gap-1 px-1 min-w-0">
+        <div 
+          ref={progressBarRef}
+          onClick={handleProgressClick}
+          className="w-full flex items-end gap-[2px] h-7 cursor-pointer relative"
+        >
+          {bars.map((height, i) => {
+            const barPercent = (i / bars.length) * 100;
+            const isActive = progressPercent >= barPercent;
+            return (
+              <div 
+                key={i}
+                className={`w-[3px] min-w-[3px] md:w-[3.5px] md:min-w-[3.5px] rounded-full transition-all duration-75 ${
+                  isActive 
+                    ? 'bg-[#00a884]' 
+                    : 'bg-black/30 dark:bg-white/30'
+                }`}
+                style={{ 
+                  height: `${height}%`
+                }}
+              />
+            );
+          })}
+        </div>
+        <div className="flex justify-between items-center text-[10px] font-bold font-mono text-zinc-650 dark:text-zinc-300">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </div>
+
+      {/* Speed Button on Right */}
+      <button
+        onClick={toggleSpeed}
+        className="w-8 h-8 rounded-full bg-black/5 hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15 flex items-center justify-center text-xs font-bold transition-all text-zinc-700 dark:text-zinc-200 shrink-0 border border-transparent cursor-pointer"
+        title="Playback Speed"
+      >
+        {playbackRate}x
+      </button>
+    </div>
+  );
+}
+
+function VideoPlayerOverlay({ mediaUrl, onClose }: { mediaUrl: string; onClose: () => void }) {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const progressBarRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+
+    const handleLoadedMetadata = () => {
+      if (video.duration && !isNaN(video.duration) && isFinite(video.duration)) {
+        setDuration(video.duration);
+      }
+    };
+
+    const handleTimeUpdate = () => {
+      setCurrentTime(video.currentTime);
+    };
+
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('timeupdate', handleTimeUpdate);
+    video.addEventListener('ended', handleEnded);
+
+    if (video.readyState >= 1) {
+      setDuration(video.duration);
+    }
+
+    return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+      video.removeEventListener('ended', handleEnded);
+    };
+  }, [mediaUrl]);
+
+  const togglePlay = () => {
+    if (!videoRef.current) return;
+    if (isPlaying) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    } else {
+      videoRef.current.playbackRate = playbackRate;
+      videoRef.current.play().then(() => {
+        setIsPlaying(true);
+      }).catch(err => {
+        console.error("Video play failed:", err);
+      });
+    }
+  };
+
+  const toggleSpeed = () => {
+    const nextSpeed = playbackRate === 1 ? 1.5 : playbackRate === 1.5 ? 2 : 1;
+    setPlaybackRate(nextSpeed);
+    if (videoRef.current) videoRef.current.playbackRate = nextSpeed;
+  };
+
+  const handleProgressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!videoRef.current || !progressBarRef.current || !duration) return;
+    const rect = progressBarRef.current.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const width = rect.width;
+    const clickPercent = Math.max(0, Math.min(1, clickX / width));
+    const newTime = clickPercent * duration;
+    videoRef.current.currentTime = newTime;
+    setCurrentTime(newTime);
+  };
+
+  const formatTime = (timeSecs: number) => {
+    if (isNaN(timeSecs) || !isFinite(timeSecs)) return "0:00";
+    const mins = Math.floor(timeSecs / 60);
+    const secs = Math.floor(timeSecs % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col items-center justify-center p-4">
+      <button onClick={onClose} className="absolute top-4 right-4 text-white p-2 z-[101]">
+        <X size={32} />
+      </button>
+
+      <div className="relative w-full max-w-4xl flex flex-col items-center group">
+        <video 
+          ref={videoRef}
+          src={mediaUrl || undefined} 
+          className="max-w-full max-h-[80vh] rounded-lg shadow-2xl cursor-pointer" 
+          onClick={togglePlay}
+          playsInline
+        />
+
+        {/* Video Controls Overlay */}
+        <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-black/80 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 rounded-b-lg flex flex-col gap-2">
+          
+          <div 
+            ref={progressBarRef}
+            onClick={handleProgressClick}
+            className="w-full h-1.5 bg-white/30 rounded-full overflow-hidden cursor-pointer relative"
+          >
+            <div 
+              className="h-full bg-emerald-500 rounded-full transition-all duration-75"
+              style={{ width: `${progressPercent}%` }}
+            />
+            {/* Thumb */}
+            <div 
+              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-emerald-500 rounded-full shadow-sm -ml-1.5"
+              style={{ left: `${progressPercent}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-white mt-1">
+            <div className="flex items-center gap-4">
+              <button onClick={togglePlay} className="hover:text-emerald-400 transition-colors">
+                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+              </button>
+              <div className="text-xs font-mono font-medium opacity-90">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </div>
+            </div>
+
+            <button 
+              onClick={toggleSpeed}
+              className="px-2 py-1 bg-white/10 hover:bg-white/20 rounded text-xs font-bold transition-all"
+            >
+              {playbackRate}x
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface AudioRecordingVisualizerProps {
+  stream: MediaStream | null;
+  isRecording: boolean;
+}
+
+function AudioRecordingVisualizer({ stream, isRecording }: AudioRecordingVisualizerProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!stream || !isRecording) return;
+
+    let audioCtx: AudioContext | null = null;
+    let source: MediaStreamAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    let animationId: number;
+
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      audioCtx = new AudioContextClass();
+      source = audioCtx.createMediaStreamSource(stream);
+      analyser = audioCtx.createAnalyser();
+      
+      analyser.fftSize = 64; 
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+      
+      source.connect(analyser);
+
+      const updateWaveform = () => {
+        if (!analyser || !containerRef.current) return;
+        analyser.getByteFrequencyData(dataArray);
+
+        const bars = containerRef.current.children;
+        const len = Math.min(bars.length, bufferLength);
+        
+        for (let i = 0; i < len; i++) {
+          const bar = bars[i] as HTMLDivElement;
+          if (bar) {
+            const value = dataArray[i];
+            const height = Math.max(4, (value / 255) * 24);
+            bar.style.height = `${height}px`;
+          }
+        }
+
+        animationId = requestAnimationFrame(updateWaveform);
+      };
+
+      updateWaveform();
+    } catch (e) {
+      console.warn("Web Audio API not supported or failed to initialize:", e);
+    }
+
+    return () => {
+      if (animationId) cancelAnimationFrame(animationId);
+      if (source) source.disconnect();
+      if (audioCtx && audioCtx.state !== 'closed') {
+        audioCtx.close().catch(() => {});
+      }
+    };
+  }, [stream, isRecording]);
+
+  return (
+    <div ref={containerRef} className="flex gap-0.5 items-center h-6 px-1.5 bg-red-100/50 dark:bg-red-950/20 rounded-full border border-red-200/50 dark:border-red-900/30">
+      {[...Array(14)].map((_, i) => (
+        <div 
+          key={i} 
+          className="w-[2.5px] bg-red-500 rounded-full transition-all duration-75"
+          style={{ height: '4px' }}
+        />
+      ))}
+    </div>
+  );
+}
+
 type ChatRoom = {
   id: string;
   name: string;
@@ -172,14 +674,56 @@ type ChatRoom = {
 export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (isActive: boolean) => void, onRefreshPage?: () => void }) {
   const [localChatList, setLocalChatList] = useState<ChatRoom[]>([]);
   const [activeChat, setActiveChat] = useState<ChatRoom | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
   const [messageText, setMessageText] = useState('');
   const [replyTo, setReplyTo] = useState<{ id: string, text: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
+  const [overlayMessage, setOverlayMessage] = useState<any>(null);
+  const [previewItems, setPreviewItems] = useState<any[]>([]);
+  const [previewIndex, setPreviewIndex] = useState<number>(0);
+
+  const handleOpenMediaPreview = (items: any[], activeIdx: number) => {
+    const formatted = items.map(item => {
+      const path = item.filePath || item.FilePath;
+      const url = getImageUrl(path);
+      return {
+        type: (item.isImg || item.type === MessageType.Image || (item.contentType && item.contentType.toLowerCase().includes('image'))) ? 'image' : 'video',
+        mediaUrl: url,
+        fileName: item.fileName || item.FileName || ''
+      };
+    });
+    setPreviewItems(formatted);
+    setPreviewIndex(activeIdx);
+    setOverlayMessage(formatted[activeIdx]);
+  };
   const swipeTriggeredRef = useRef<boolean>(false);
 
   // User context
   const [currentUserId, setCurrentUserId] = useState<number>(0);
   const [onlineUsers, setOnlineUsers] = useState<Set<number>>(new Set());
+
+  // Chat Bubble Theme and recording state enhancements
+  const [chatThemeColor, setChatThemeColor] = useState(() => {
+    return localStorage.getItem('chat_theme_color') || '#00A884';
+  });
+
+  const [recordingState, setRecordingState] = useState<'idle' | 'recording' | 'paused'>('idle');
+  const [recordedBlobs, setRecordedBlobs] = useState<Blob[]>([]);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [previewCurrentTime, setPreviewCurrentTime] = useState(0);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+  const previewIntervalRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const color = localStorage.getItem('chat_theme_color') || '#00A884';
+      setChatThemeColor(color);
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
 
   // API Loading states
   const [isChatsLoading, setIsChatsLoading] = useState(false);
@@ -193,12 +737,15 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // Audio / Recording states
   const [isRecording, setIsRecording] = useState(false);
   const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordingStream, setRecordingStream] = useState<MediaStream | null>(null);
   const recordingIntervalRef = useRef<number | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
   // File Inputs & Attachments
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   
   // Modals / Overlays
@@ -259,6 +806,16 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   const [attachmentType, setAttachmentType] = useState<MessageType>(MessageType.File);
   const [attachmentCaption, setAttachmentCaption] = useState('');
 
+  type MediaPreviewItem = {
+    fileName: string;
+    contentType: string;
+    fileSize: number;
+    pathBase64: string;
+    type: MessageType;
+  };
+  const [mediaPreviews, setMediaPreviews] = useState<MediaPreviewItem[]>([]);
+  const [mediaActiveIndex, setMediaActiveIndex] = useState(0);
+
   // Participant Management input
   const [recipientIdToAdd, setRecipientIdToAdd] = useState('');
   const [isManagingParticipants, setIsManagingParticipants] = useState(false);
@@ -274,10 +831,34 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
         setCurrentUserId(user.id || user.Id || 0);
       }
       const appNames = getStoredAppNamesList();
-      if (appNames && appNames.personIdNames) {
-        setAvailablePersons(appNames.personIdNames);
-      } else if (appNames && appNames.PersonIdNames) {
-        setAvailablePersons(appNames.PersonIdNames);
+      if (appNames) {
+        const possibleArrays = [
+          appNames,
+          appNames.personIdNames,
+          appNames.PersonIdNames,
+          appNames.personNamesId,
+          appNames.PersonNamesId,
+          appNames.result?.personIdNames,
+          appNames.result?.PersonIdNames,
+          appNames.result?.personNamesId,
+          appNames.result?.PersonNamesId,
+          appNames.Result?.personIdNames,
+          appNames.Result?.PersonIdNames,
+          appNames.Result?.personNamesId,
+          appNames.Result?.PersonNamesId,
+          appNames.data?.personIdNames,
+          appNames.data?.PersonIdNames,
+          appNames.data?.personNamesId,
+          appNames.data?.PersonNamesId,
+          appNames.Data?.personIdNames,
+          appNames.Data?.PersonIdNames,
+          appNames.Data?.personNamesId,
+          appNames.Data?.PersonNamesId,
+        ];
+        const foundArray = possibleArrays.find(arr => Array.isArray(arr));
+        if (foundArray) {
+          setAvailablePersons(foundArray);
+        }
       }
     } catch (err) {
       console.warn("Could not retrieve current user details", err);
@@ -322,6 +903,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   useEffect(() => {
     (window as any).__activeChatId = activeChat?.id || null;
     activeChatRef.current = activeChat;
+    setIsSearchingMessages(false);
+    setMessageSearchQuery('');
   }, [activeChat]);
 
   const currentUserIdRef = useRef<number>(0);
@@ -329,7 +912,308 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
 
-  const [typingUsers, setTypingUsers] = useState<{ [chatId: string]: string[] }>({});
+  const getMessageTickColor = (msg: any) => {
+    if (msg.error) return 'text-red-500';
+    if (!activeChat) return msg.isMe ? 'text-white/60' : 'text-zinc-400';
+
+    const isMe = msg.isMe;
+
+    if (isMe) {
+      const recipientParticipants = (activeChat.participants || []).filter(
+        p => Number(p.personId || p.PersonId || p.id || p.Id) !== Number(currentUserId)
+      );
+
+      if (recipientParticipants.length === 0) return 'text-white/60';
+
+      const isGroupChat = activeChat.isGroup || activeChat.IsGroup;
+
+      if (isGroupChat) {
+        // Find the last message in the chat
+        const lastMsg = messages[messages.length - 1];
+        if (!lastMsg) return 'text-white/60';
+        const lastMsgTime = new Date(lastMsg.sentAt || lastMsg.SentAt || 0).getTime();
+
+        // If the last read at of all the recipient participants is greater than the time the last message was sent, blue tick
+        const allRead = recipientParticipants.every(p => {
+          const pReadAt = p.lastReadAt || p.LastReadAt;
+          if (!pReadAt) return false;
+          return new Date(pReadAt).getTime() >= lastMsgTime;
+        });
+
+        return allRead ? 'text-[#53bdeb]' : 'text-white/60';
+      } else {
+        // If the chat is not a group, if any of the messages is greater than the last read of the recipient, just double tick it (else blue tick)
+        const msgTime = new Date(msg.sentAt || msg.SentAt || 0).getTime();
+        const recipient = recipientParticipants[0];
+        if (!recipient) return 'text-white/60';
+        
+        const pReadAt = recipient.lastReadAt || recipient.LastReadAt;
+        if (!pReadAt) return 'text-white/60';
+
+        const isUnread = msgTime > new Date(pReadAt).getTime();
+        return isUnread ? 'text-white/60' : 'text-[#53bdeb]';
+      }
+    } else {
+      // Message received from the recipient
+      const myParticipant = (activeChat.participants || []).find(
+        p => Number(p.personId || p.PersonId || p.id || p.Id) === Number(currentUserId)
+      );
+      if (!myParticipant) return 'text-zinc-400';
+
+      const myReadAt = myParticipant.lastReadAt || myParticipant.LastReadAt;
+      if (!myReadAt) return 'text-zinc-400';
+
+      const msgTime = new Date(msg.sentAt || msg.SentAt || 0).getTime();
+      const isUnread = msgTime > new Date(myReadAt).getTime();
+      return isUnread ? 'text-zinc-400' : 'text-[#53bdeb]';
+    }
+  };
+
+  const renderMsgAttachments = (msg: any) => {
+    if (!msg.attachments || msg.attachments.length === 0) return null;
+
+    // Split attachments into media and non-media
+    const mediaItems: any[] = [];
+    const nonMediaItems: any[] = [];
+
+    msg.attachments.forEach((att: any) => {
+      const name = att.fileName || att.FileName || 'Attachment';
+      const cType = (att.contentType || att.ContentType || '').toLowerCase();
+      const typeVal = att.type !== undefined ? att.type : att.Type;
+
+      const isImg = cType.includes('image') || 
+                    typeVal === MessageType.Image || 
+                    typeVal === 'Image' || 
+                    typeVal === 1 ||
+                    name.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|svg|bmp)$/);
+                    
+      const isVid = cType.includes('video') || 
+                    typeVal === MessageType.Video || 
+                    typeVal === 'Video' || 
+                    typeVal === 3 || 
+                    name.toLowerCase().match(/\.(mp4|webm|ogg|mov|avi|mkv)$/);
+
+      if (isImg || isVid) {
+        mediaItems.push({ ...att, isImg, isVid });
+      } else {
+        nonMediaItems.push(att);
+      }
+    });
+
+    const renderedElements: React.ReactNode[] = [];
+
+    // 1. Render Media Gallery if we have media items
+    if (mediaItems.length > 0) {
+      if (mediaItems.length === 1) {
+        const att = mediaItems[0];
+        const path = att.filePath || att.FilePath;
+        const url = getImageUrl(path);
+        const name = att.fileName || att.FileName || 'Attachment';
+        
+        if (att.isImg && url) {
+          renderedElements.push(
+            <div key="media-0" className="relative overflow-hidden rounded-lg border border-black/10 shadow-sm max-w-full">
+              <img 
+                src={url} 
+                alt={name} 
+                className="rounded-lg max-h-56 object-cover w-full cursor-pointer hover:opacity-95 transition-opacity" 
+                referrerPolicy="no-referrer"
+                onClick={() => handleOpenMediaPreview(mediaItems, 0)}
+              />
+            </div>
+          );
+        } else if (att.isVid && url) {
+          renderedElements.push(
+            <div key="media-0" className="relative overflow-hidden rounded-lg border border-black/10 bg-black/5 p-1 max-w-full">
+              <video 
+                src={url} 
+                controls 
+                className="rounded-lg max-h-56 w-full object-contain cursor-pointer" 
+                preload="metadata"
+                onClick={() => handleOpenMediaPreview(mediaItems, 0)}
+              />
+            </div>
+          );
+        }
+      } else if (mediaItems.length === 2) {
+        // Split the div into 2 columns
+        renderedElements.push(
+          <div key="media-gallery" className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden w-full h-36 border border-black/10 shadow-sm bg-black/5">
+            {mediaItems.map((att, idx) => {
+              const path = att.filePath || att.FilePath;
+              const url = getImageUrl(path);
+              const name = att.fileName || att.FileName || 'Attachment';
+              return (
+                <div 
+                  key={idx} 
+                  className="relative h-full w-full cursor-pointer hover:opacity-90 transition-opacity bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden"
+                  onClick={() => handleOpenMediaPreview(mediaItems, idx)}
+                >
+                  {att.isImg ? (
+                    <img src={url} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full relative flex items-center justify-center">
+                      <video src={url} className="w-full h-full object-cover" preload="metadata" />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Play size={24} className="text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      } else if (mediaItems.length === 3) {
+        // 2 up, 1 below
+        renderedElements.push(
+          <div key="media-gallery" className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden w-full border border-black/10 shadow-sm bg-black/5">
+            {/* First 2 items in top row */}
+            {mediaItems.slice(0, 2).map((att, idx) => {
+              const path = att.filePath || att.FilePath;
+              const url = getImageUrl(path);
+              const name = att.fileName || att.FileName || 'Attachment';
+              return (
+                <div 
+                  key={idx} 
+                  className="h-24 cursor-pointer hover:opacity-90 transition-opacity bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden"
+                  onClick={() => handleOpenMediaPreview(mediaItems, idx)}
+                >
+                  {att.isImg ? (
+                    <img src={url} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full relative flex items-center justify-center">
+                      <video src={url} className="w-full h-full object-cover" preload="metadata" />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Play size={20} className="text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {/* 3rd item at the bottom takes full width (col-span-2) */}
+            {(() => {
+              const att = mediaItems[2];
+              const path = att.filePath || att.FilePath;
+              const url = getImageUrl(path);
+              const name = att.fileName || att.FileName || 'Attachment';
+              return (
+                <div 
+                  key={2} 
+                  className="col-span-2 h-28 cursor-pointer hover:opacity-90 transition-opacity bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden"
+                  onClick={() => handleOpenMediaPreview(mediaItems, 2)}
+                >
+                  {att.isImg ? (
+                    <img src={url} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full relative flex items-center justify-center">
+                      <video src={url} className="w-full h-full object-cover" preload="metadata" />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Play size={24} className="text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        );
+      } else {
+        // 4 or more: square layout of first 4, with overlay on the 4th
+        const hasMore = mediaItems.length > 4;
+        renderedElements.push(
+          <div key="media-gallery" className="grid grid-cols-2 gap-1 rounded-xl overflow-hidden w-full border border-black/10 shadow-sm bg-black/5">
+            {mediaItems.slice(0, 4).map((att, idx) => {
+              const path = att.filePath || att.FilePath;
+              const url = getImageUrl(path);
+              const name = att.fileName || att.FileName || 'Attachment';
+              const isLast = idx === 3;
+
+              return (
+                <div 
+                  key={idx} 
+                  className="h-24 relative cursor-pointer hover:opacity-90 transition-opacity bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center overflow-hidden"
+                  onClick={() => handleOpenMediaPreview(mediaItems, idx)}
+                >
+                  {att.isImg ? (
+                    <img src={url} alt={name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div className="w-full h-full relative flex items-center justify-center">
+                      <video src={url} className="w-full h-full object-cover" preload="metadata" />
+                      <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
+                        <Play size={20} className="text-white" fill="currentColor" />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {isLast && hasMore && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white font-extrabold text-lg tracking-wider">
+                      +{mediaItems.length - 3}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+    }
+
+    // 2. Render Non-Media Items (Audio, PDF, Files, etc.)
+    nonMediaItems.forEach((att, idx) => {
+      const path = att.filePath || att.FilePath;
+      const url = getImageUrl(path);
+      const name = att.fileName || att.FileName || 'Attachment';
+      const cType = (att.contentType || att.ContentType || '').toLowerCase();
+      const typeVal = att.type !== undefined ? att.type : att.Type;
+
+      const isAud = cType.includes('audio') || 
+                    typeVal === MessageType.Audio || 
+                    typeVal === 'Audio' || 
+                    typeVal === 2 || 
+                    name.toLowerCase().match(/\.(mp3|wav|ogg|m4a|aac|flac)$/);
+
+      if (isAud) {
+        renderedElements.push(
+          <div key={`non-media-${idx}`} className="w-full mt-1">
+            <AudioAttachmentPlayer mediaUrl={url} fileName={name} fileSize={att.fileSize || att.FileSize} isMe={msg.isMe} />
+          </div>
+        );
+      } else {
+        renderedElements.push(
+          <div 
+            key={`non-media-${idx}`}
+            className="flex items-center gap-2.5 p-2 bg-black/5 dark:bg-white/10 hover:bg-black/10 hover:dark:bg-white/15 rounded-xl border border-zinc-200/40 text-zinc-800 dark:text-zinc-100 transition-all text-xs w-full"
+          >
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-600 shrink-0">
+              <FileText size={16} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-bold truncate text-zinc-800 dark:text-zinc-100">{name}</p>
+              <p className="text-[10px] text-zinc-500">{att.fileSize || att.FileSize ? `${((att.fileSize || att.FileSize) / 1024).toFixed(1)} KB` : 'Document'}</p>
+            </div>
+            <a 
+              href={url} 
+              download={name} 
+              className="p-1.5 text-zinc-500 hover:text-[#53bdeb] dark:text-zinc-400 rounded-lg bg-white dark:bg-zinc-800 shadow-sm border border-zinc-200/50 hover:scale-105 transition-all cursor-pointer"
+              title="Download File"
+            >
+              <Download size={12} />
+            </a>
+          </div>
+        );
+      }
+    });
+
+    return (
+      <div className="flex flex-col gap-2 max-w-sm mt-1">
+        {renderedElements}
+      </div>
+    );
+  };
+
+  const [typingUsers, setTypingUsers] = useState<{ [chatId: string]: { name: string, action: string }[] }>({});
 
   useEffect(() => {
     // WebSocket real-time event listeners
@@ -341,9 +1225,34 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       const currentActive = activeChatRef.current;
       const currentUid = currentUserIdRef.current;
 
+      const senderId = Number(msg.senderPersonId || msg.SenderPersonId);
+      if (senderId && senderId !== currentUid) {
+        // Trigger incoming haptic vibration
+        triggerHaptic('incoming');
+        
+        // Silently mark as read when message is received
+        fetch(`https://kv5zhpcr-7190.uks1.devtunnels.ms/Home_Security/Message/MarkAsRead?chatId=${chatIdStr}`, {
+          method: 'GET',
+          headers: {
+            'accept': '*/*'
+          }
+        }).catch(() => {});
+
+        setOnlineUsers(prev => {
+          if (!prev.has(senderId)) {
+            const next = new Set(prev);
+            next.add(senderId);
+            return next;
+          }
+          return prev;
+        });
+      }
+
       // 1. If this message is for the currently active chat, append it to visual logs
       if (currentActive && chatIdStr === currentActive.id) {
         setMessages(prev => {
+          const isMe = (msg.senderPersonId || msg.SenderPersonId) === currentUid;
+          if (isMe) return prev;
           const msgId = (msg.id || msg.Id || '').toString();
           if (!msgId || prev.some(m => m.id === msgId)) return prev;
           
@@ -352,11 +1261,13 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             text: msg.content || msg.Content || '',
             time: new Date(msg.sentAt || msg.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
             sentAt: msg.sentAt || msg.SentAt || new Date().toISOString(),
-            isMe: (msg.senderPersonId || msg.SenderPersonId) === currentUid,
+            isMe: isMe,
             senderName: msg.senderName || msg.SenderName || 'Anonymous',
             type: msg.type === MessageType.Image ? 'image' : msg.type === MessageType.Audio ? 'audio' : 'text',
             mediaUrl: msg.attachments && msg.attachments.length > 0 ? (msg.attachments[0].fileUrl || msg.attachments[0].filePath || msg.attachments[0].FilePath) : undefined,
-            attachments: msg.attachments || []
+            attachments: msg.attachments || [],
+            replyToMessageId: msg.replyToMessageId || msg.ReplyToMessageId || msg.replyTo?.id || msg.ReplyTo?.Id,
+            replyTo: msg.replyTo || msg.ReplyTo
           };
           const next = [...prev, mapped];
           saveData(STORES.MESSAGES, { chatId: currentActive.id, list: next }).catch(() => {});
@@ -381,7 +1292,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           if (c.id === chatIdStr) {
             updatedItem = {
               ...c,
-              lastMessage: msg.content || msg.Content || (msg.type === MessageType.Image ? 'Image' : msg.type === MessageType.Audio ? 'Voice Message' : ''),
+              lastMessage: getDescriptiveLastMessage(msg),
               time: new Date(msg.sentAt || msg.SentAt || new Date()).toLocaleDateString([], { month: 'short', day: 'numeric' }),
               unread: (msg.senderPersonId || msg.SenderPersonId) === currentUid ? c.unread : c.unread + 1,
               lastMessageSenderId: msg.senderPersonId || msg.SenderPersonId || 0,
@@ -427,7 +1338,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           if (c.id === chatIdStr) {
             const updated = {
               ...c,
-              lastMessage: msg.content || msg.Content || c.lastMessage
+              lastMessage: getDescriptiveLastMessage(msg) || c.lastMessage
             };
             saveData(STORES.CHATS, updated).catch(() => {});
             return updated;
@@ -465,17 +1376,34 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       // Ignore typing broadcasts initiated by the logged in user themselves
       if (senderPersonId === currentUid) return;
 
+      const action = dto.action || dto.Action || 'typing';
+
+      // Play sound only if it's a new or changed typing action
+      const prevTyping = typingUsers[chatIdStr] || [];
+      const isNew = !prevTyping.some(t => t.name === senderName);
+      if (isNew) {
+        if (action.includes('recording')) {
+          playNotificationSound('recording');
+        } else {
+          playNotificationSound('typingKeyStroke');
+        }
+      }
+
       setTypingUsers(prev => {
         const current = prev[chatIdStr] || [];
-        if (current.includes(senderName)) return prev;
-        return { ...prev, [chatIdStr]: [...current, senderName] };
+        const existing = current.find(t => t.name === senderName);
+        if (existing) {
+          if (existing.action === action) return prev;
+          return { ...prev, [chatIdStr]: current.map(t => t.name === senderName ? { name: senderName, action } : t) };
+        }
+        return { ...prev, [chatIdStr]: [...current, { name: senderName, action }] };
       });
 
       // Clear after 5 seconds of inactivity
       setTimeout(() => {
         setTypingUsers(prev => {
           const current = prev[chatIdStr] || [];
-          return { ...prev, [chatIdStr]: current.filter(n => n !== senderName) };
+          return { ...prev, [chatIdStr]: current.filter(t => t.name !== senderName) };
         });
       }, 5000);
     };
@@ -488,7 +1416,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
         const mapped = {
           id: chatIdStr,
           name: chat.name || chat.Name || 'New Chat',
-          lastMessage: chat.lastMessage?.content || chat.LastMessage?.Content || 'Created chat',
+          lastMessage: getDescriptiveLastMessage(chat.lastMessage || chat.LastMessage) || 'Created chat',
           time: (chat.lastMessage?.sentAt || chat.LastMessage?.SentAt) ? new Date(chat.lastMessage?.sentAt || chat.LastMessage?.SentAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Now',
           unread: chat.unreadCount || chat.UnreadCount || 0,
           isGroup: chat.isGroup || chat.IsGroup || false,
@@ -630,22 +1558,68 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
     const handleMessagesRead = (pkg: any) => {
       if (!pkg) return;
-      const chatIdStr = (pkg.chatId || pkg.ChatId).toString();
-      const pid = pkg.personId || pkg.PersonId;
-      const currentUid = currentUserIdRef.current;
+      const chatIdStr = (pkg.chatId || pkg.ChatId || "").toString();
+      const pid = Number(pkg.personId || pkg.PersonId || 0);
+      const readAtStr = pkg.readAt || pkg.ReadAt || new Date().toISOString();
+      const currentUid = Number(currentUserIdRef.current);
 
-      if (pid === currentUid) {
-        setLocalChatList(prev => {
-          return prev.map(c => {
-            if (c.id === chatIdStr) {
-              const updated = { ...c, unread: 0 };
-              saveData(STORES.CHATS, updated).catch(() => {});
-              return updated;
+      setLocalChatList(prev => {
+        return prev.map(c => {
+          if (c.id === chatIdStr) {
+            let updatedUnread = c.unread;
+            if (pid === currentUid) {
+              updatedUnread = 0;
             }
-            return c;
-          });
+
+            const updatedParticipants = (c.participants || []).map((p: any) => {
+              const pIdNum = Number(p.personId || p.PersonId || p.id || p.Id || 0);
+              
+              if (pIdNum === pid) {
+                return {
+                  ...p,
+                  lastReadAt: readAtStr,
+                  LastReadAt: readAtStr
+                };
+              }
+              return p;
+            });
+
+            const updatedChat = {
+              ...c,
+              unread: updatedUnread,
+              participants: updatedParticipants,
+              Participants: updatedParticipants
+            };
+
+            saveData(STORES.CHATS, updatedChat).catch(() => {});
+            return updatedChat;
+          }
+          return c;
         });
-      }
+      });
+
+      setActiveChat(prev => {
+        if (!prev || prev.id !== chatIdStr) return prev;
+        
+        const updatedParticipants = (prev.participants || []).map((p: any) => {
+          const pIdNum = Number(p.personId || p.PersonId || p.id || p.Id || 0);
+          
+          if (pIdNum === pid) {
+            return {
+              ...p,
+              lastReadAt: readAtStr,
+              LastReadAt: readAtStr
+            };
+          }
+          return p;
+        });
+
+        return {
+          ...prev,
+          participants: updatedParticipants,
+          Participants: updatedParticipants
+        };
+      });
     };
 
     const extractPayload = (rawMsg: any) => {
@@ -683,6 +1657,21 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     const handleParticipantsAddedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ParticipantsAdded]", ...args); handleParticipantsAdded(extractPayload(args[0])); };
     const handleParticipantRemovedWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: ParticipantRemoved]", ...args); handleParticipantRemoved(extractPayload(args[0])); };
     const handleMessagesReadWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessagesRead]", ...args); handleMessagesRead(extractPayload(args[0])); };
+    const handleUpdateChatWrapped = (...args: any[]) => {
+      console.log("[HOME_SIGNALR_EVENT: UpdateChat]", ...args);
+      if (args.length >= 3 && args[0] === "MessagesRead") {
+        handleMessagesRead(extractPayload(args[2]));
+      } else if (args.length >= 3 && args[0] === "MessageDeleted") {
+        handleMessageDeleted(extractPayload(args[2]));
+      } else if (args.length === 1) {
+        const payload = extractPayload(args[0]);
+        if (payload && (payload.eventName === "MessagesRead" || payload.EventName === "MessagesRead" || payload.chatId)) {
+          handleMessagesRead(payload);
+        } else if (payload && (payload.eventName === "MessageDeleted" || payload.EventName === "MessageDeleted" || payload.isDeleted || payload.IsDeleted)) {
+          handleMessageDeleted(payload);
+        }
+      }
+    };
     const handleUserOnlineWrapped = (...args: any[]) => {
       console.log("[HOME_SIGNALR_EVENT: UserOnline]", ...args);
       const personId = Number(extractPayload(args[0]));
@@ -707,6 +1696,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     homeSecurityHubConnection.on("ParticipantsAdded", handleParticipantsAddedWrapped);
     homeSecurityHubConnection.on("ParticipantRemoved", handleParticipantRemovedWrapped);
     homeSecurityHubConnection.on("MessagesRead", handleMessagesReadWrapped);
+    homeSecurityHubConnection.on("UpdateChat", handleUpdateChatWrapped);
     homeSecurityHubConnection.on("UserOnline", handleUserOnlineWrapped);
 
     return () => {
@@ -722,6 +1712,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       homeSecurityHubConnection.off("ParticipantsAdded", handleParticipantsAddedWrapped);
       homeSecurityHubConnection.off("ParticipantRemoved", handleParticipantRemovedWrapped);
       homeSecurityHubConnection.off("MessagesRead", handleMessagesReadWrapped);
+      homeSecurityHubConnection.off("UpdateChat", handleUpdateChatWrapped);
       homeSecurityHubConnection.off("UserOnline", handleUserOnlineWrapped);
     };
   }, []);
@@ -729,6 +1720,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   const [pullDistance, setPullDistance] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchingMessages, setIsSearchingMessages] = useState(false);
+  const [messageSearchQuery, setMessageSearchQuery] = useState('');
   const [swipeOffset, setSwipeOffset] = useState<number>(0);
   const [swipingMessageId, setSwipingMessageId] = useState<string | null>(null);
   const [activeScrollDate, setActiveScrollDate] = useState<string>('');
@@ -851,7 +1844,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           let lastMsgText = "No messages yet";
           let lastMsgTime = "Just now";
           if (chat.lastMessage) {
-            lastMsgText = chat.lastMessage.content || (chat.lastMessage.type === MessageType.Image ? "📷 Image" : chat.lastMessage.type === MessageType.Audio ? "🎵 Voice Note" : "Attached file");
+            lastMsgText = getDescriptiveLastMessage(chat.lastMessage);
             lastMsgTime = new Date(chat.lastMessage.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
           }
 
@@ -930,9 +1923,32 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     const handleStorageChange = () => {
       const appNames = getStoredAppNamesList();
       if (appNames) {
-        const list = appNames.personIdNames || appNames.PersonIdNames;
-        if (list) {
-          setAvailablePersons(list);
+        const possibleArrays = [
+          appNames,
+          appNames.personIdNames,
+          appNames.PersonIdNames,
+          appNames.personNamesId,
+          appNames.PersonNamesId,
+          appNames.result?.personIdNames,
+          appNames.result?.PersonIdNames,
+          appNames.result?.personNamesId,
+          appNames.result?.PersonNamesId,
+          appNames.Result?.personIdNames,
+          appNames.Result?.PersonIdNames,
+          appNames.Result?.personNamesId,
+          appNames.Result?.PersonNamesId,
+          appNames.data?.personIdNames,
+          appNames.data?.PersonIdNames,
+          appNames.data?.personNamesId,
+          appNames.data?.PersonNamesId,
+          appNames.Data?.personIdNames,
+          appNames.Data?.PersonIdNames,
+          appNames.Data?.personNamesId,
+          appNames.Data?.PersonNamesId,
+        ];
+        const foundArray = possibleArrays.find(arr => Array.isArray(arr));
+        if (foundArray) {
+          setAvailablePersons(foundArray);
         }
       }
     };
@@ -970,7 +1986,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
   // Set recording timer
   useEffect(() => {
-    if (isRecording) {
+    if (isRecording && recordingState === 'recording') {
       recordingIntervalRef.current = window.setInterval(() => {
         setRecordingDuration(d => d + 1);
       }, 1000);
@@ -980,7 +1996,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     return () => {
       if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
     };
-  }, [isRecording]);
+  }, [isRecording, recordingState]);
 
   // Handle active chat messages hook
   const loadActiveChatMessages = async (roomId: string) => {
@@ -1017,7 +2033,9 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             senderName: msg.senderName || 'Anonymous',
             type: msg.type === MessageType.Image ? 'image' : msg.type === MessageType.Audio ? 'audio' : 'text',
             mediaUrl: msg.attachments && msg.attachments.length > 0 ? (msg.attachments[0].fileUrl || msg.attachments[0].filePath) : undefined,
-            attachments: msg.attachments || []
+            attachments: msg.attachments || [],
+            replyToMessageId: msg.replyToMessageId || msg.ReplyToMessageId || msg.replyTo?.id || msg.ReplyTo?.Id,
+            replyTo: msg.replyTo || msg.ReplyTo
           }));
           setMessages(mappedMessages);
           
@@ -1049,13 +2067,41 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     return () => onChatActive(false);
   }, [activeChat, onChatActive]);
 
+  // Update activeChatId in localStorage for notifications
+  useEffect(() => {
+    if (activeChat) {
+      localStorage.setItem('activeChatId', activeChat.id);
+    } else {
+      localStorage.removeItem('activeChatId');
+    }
+  }, [activeChat]);
+
   // Send message implementation (Text)
   const handleSendMessage = async () => {
+    triggerHaptic('light');
     if (!messageText.trim() || !activeChat) return;
     const txt = messageText;
     const currentReplyTo = replyTo;
+    
+    // Optimistic update
+    const tempId = Date.now().toString();
+    const localMessage = {
+      id: tempId,
+      text: txt,
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: new Date().toISOString(),
+      isMe: true,
+      senderName: 'You',
+      type: 'text',
+      attachments: [],
+      replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0,
+      pending: true
+    };
+    
+    setMessages(prev => [...prev, localMessage]);
     setMessageText('');
     setReplyTo(null);
+    setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
 
     try {
       const payload = {
@@ -1067,82 +2113,210 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       };
       
       const res = await sendMessage(payload);
-      console.log('SendMessage Success:', res);
+      
       if (res) {
+        playNotificationSound('messageSent');
+        
+        // Replace localMessage with server response
         setMessages(prev => {
-          const msgId = (res.id || res.Id)?.toString();
-          if (!msgId || prev.some(m => m.id === msgId)) return prev;
-          const mapped = {
-            id: msgId,
+          const next = prev.map(m => m.id === tempId ? {
+            ...m,
+            id: (res.id || res.Id)?.toString(),
             text: res.content || res.Content || txt,
             time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: res.sentAt || res.SentAt || new Date().toISOString(),
-            isMe: true,
-            senderName: res.senderName || res.SenderName || 'You',
-            type: res.type === MessageType.Image ? 'image' : res.type === MessageType.Audio ? 'audio' : 'text',
-            mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
-            attachments: res.attachments || []
-          };
-          const next = [...prev, mapped];
+            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            replyTo: res.replyTo || res.ReplyTo || currentReplyTo,
+            pending: false
+          } : m);
           saveData(STORES.MESSAGES, { chatId: activeChat.id, list: next }).catch(() => {});
           return next;
         });
-        setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      } else {
+        // Fallback: Remove temporary message if sending failed
+        setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err: any) {
-      console.error("Failed to send message via API, rendering local preview:", err);
-      // Local optimistic update
-      setMessages(prev => [...prev, {
-        id: Math.random().toString(),
-        text: txt,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sentAt: new Date().toISOString(),
-        isMe: true,
-        senderName: 'You',
-        type: 'text'
-      }]);
-      setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      console.error("Failed to send message via API:", err);
+      // Remove temporary message if sending failed
+      setMessages(prev => prev.filter(m => m.id !== tempId));
+    }
+  };
+
+  const deletePreviewItem = (e: React.MouseEvent, idxToDelete: number) => {
+    e.stopPropagation();
+    const updated = mediaPreviews.filter((_, idx) => idx !== idxToDelete);
+    if (updated.length === 0) {
+      handleCancelAttachment();
+    } else {
+      setMediaPreviews(updated);
+      let nextActive = mediaActiveIndex;
+      if (mediaActiveIndex >= updated.length) {
+        nextActive = updated.length - 1;
+      }
+      setMediaActiveIndex(nextActive);
+      const activeItem = updated[nextActive];
+      if (activeItem) {
+        setAttachmentFileName(activeItem.fileName);
+        setAttachmentContentType(activeItem.contentType);
+        setAttachmentFileSize(activeItem.fileSize);
+        setAttachmentPathBase64(activeItem.pathBase64);
+        setAttachmentType(activeItem.type);
+      }
     }
   };
 
   // Convert File object to Base64 String and Auto-Populate Form Fields
   const handleAttachmentUpload = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      const file = e.target.files[0];
-      
-      let determinedType = MessageType.File;
-      if (file.type.startsWith('image/')) {
-        determinedType = MessageType.Image;
-      } else if (file.type.startsWith('audio/')) {
-        determinedType = MessageType.Audio;
-      } else if (file.type.startsWith('video/')) {
-        determinedType = MessageType.Video;
-      }
+      const filesList = Array.from(e.target.files);
+      const isMediaSelector = e.target.accept?.includes('image') || e.target.accept?.includes('video');
 
-      // Read as base64 string
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64Content = reader.result as string;
-        
-        // Auto-fill all input fields immediately
-        setAttachmentFileName(file.name);
-        setAttachmentContentType(file.type || 'application/octet-stream');
-        setAttachmentFileSize(file.size);
-        setAttachmentPathBase64(base64Content);
-        setAttachmentThumbnailPath('');
-        setAttachmentType(determinedType);
-        setAttachmentCaption('');
-        
-        // Trigger modal to show auto-filled fields and edit them
-        setShowAttachmentModal(true);
-      };
-      reader.readAsDataURL(file);
+      if (isMediaSelector) {
+        // Media Selector: Images and Videos (Can select multiple)
+        const promises = filesList.map((file: any) => {
+          return new Promise<MediaPreviewItem>((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              let determinedType = MessageType.File;
+              if (file.type.startsWith('image/')) {
+                determinedType = MessageType.Image;
+              } else if (file.type.startsWith('video/')) {
+                determinedType = MessageType.Video;
+              }
+              resolve({
+                fileName: file.name,
+                contentType: file.type || 'application/octet-stream',
+                fileSize: file.size,
+                pathBase64: reader.result as string,
+                type: determinedType
+              });
+            };
+            reader.readAsDataURL(file);
+          });
+        });
+
+        Promise.all(promises).then((results) => {
+          setMediaPreviews(results);
+          setMediaActiveIndex(0);
+          setAttachmentCaption('');
+          
+          // Compat fallbacks for modal compatibility
+          setAttachmentFileName(results[0].fileName);
+          setAttachmentContentType(results[0].contentType);
+          setAttachmentFileSize(results[0].fileSize);
+          setAttachmentPathBase64(results[0].pathBase64);
+          setAttachmentType(results[0].type);
+          
+          setShowAttachmentModal(true);
+        });
+      } else {
+        // General Attachment Input
+        if (filesList.length > 1) {
+          // If multiple files are selected, send each file selected as a message immediately
+          filesList.forEach((file: any) => {
+            let determinedType = MessageType.File;
+            if (file.type.startsWith('image/')) {
+              determinedType = MessageType.Image;
+            } else if (file.type.startsWith('audio/')) {
+              determinedType = MessageType.Audio;
+            } else if (file.type.startsWith('video/')) {
+              determinedType = MessageType.Video;
+            }
+
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+              const base64Content = reader.result as string;
+              const body = {
+                chatId: parseInt(activeChat!.id),
+                content: "",
+                type: determinedType,
+                attachments: [
+                  {
+                    fileName: file.name,
+                    filePath: base64Content,
+                    contentType: file.type || 'application/octet-stream',
+                    fileSize: file.size,
+                    thumbnailPath: "",
+                    type: determinedType
+                  }
+                ]
+              };
+
+              try {
+                const res = await sendMessage(body);
+                if (res) {
+                  setMessages(prev => {
+                    const msgId = (res.id || res.Id)?.toString();
+                    if (!msgId || prev.some(m => m.id === msgId)) return prev;
+                    const mapped = {
+                      id: msgId,
+                      text: res.content || res.Content || file.name,
+                      time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                      sentAt: res.sentAt || res.SentAt || new Date().toISOString(),
+                      isMe: true,
+                      senderName: res.senderName || res.SenderName || 'You',
+                      type: res.type === MessageType.Image ? 'image' : res.type === MessageType.Audio ? 'audio' : 'text',
+                      mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
+                      attachments: res.attachments || []
+                    };
+                    const next = [...prev, mapped];
+                    saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
+                    return next;
+                  });
+                  setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+                }
+              } catch (err) {
+                console.error("Failed sending file immediately:", err);
+              }
+            };
+            reader.readAsDataURL(file);
+          });
+        } else {
+          // Single file selected, show in preview modal
+          const file: any = filesList[0];
+          let determinedType = MessageType.File;
+          if (file.type.startsWith('image/')) {
+            determinedType = MessageType.Image;
+          } else if (file.type.startsWith('audio/')) {
+            determinedType = MessageType.Audio;
+          } else if (file.type.startsWith('video/')) {
+            determinedType = MessageType.Video;
+          }
+
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            const base64Content = reader.result as string;
+            
+            setMediaPreviews([{
+              fileName: file.name,
+              contentType: file.type || 'application/octet-stream',
+              fileSize: file.size,
+              pathBase64: base64Content,
+              type: determinedType
+            }]);
+            setMediaActiveIndex(0);
+
+            setAttachmentFileName(file.name);
+            setAttachmentContentType(file.type || 'application/octet-stream');
+            setAttachmentFileSize(file.size);
+            setAttachmentPathBase64(base64Content);
+            setAttachmentThumbnailPath('');
+            setAttachmentType(determinedType);
+            setAttachmentCaption('');
+            
+            setShowAttachmentModal(true);
+          };
+          reader.readAsDataURL(file);
+        }
+      }
     }
   };
 
   // Cancel and clean up attachment modal state
   const handleCancelAttachment = () => {
     setShowAttachmentModal(false);
+    setMediaPreviews([]);
+    setMediaActiveIndex(0);
     setAttachmentFileName('');
     setAttachmentContentType('');
     setAttachmentFileSize(0);
@@ -1154,22 +2328,78 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // Submit and send custom filled attachment
   const handleSendAttachment = async () => {
     if (!activeChat) return;
+
+    // Construct attachments array from mediaPreviews
+    const attachmentsToSend = mediaPreviews.map(p => ({
+      fileName: p.fileName,
+      filePath: p.pathBase64,
+      contentType: p.contentType,
+      fileSize: p.fileSize,
+      thumbnailPath: "",
+      type: p.type
+    }));
+
+    // If no mediaPreviews (fallback safety)
+    if (attachmentsToSend.length === 0 && attachmentPathBase64) {
+      attachmentsToSend.push({
+        fileName: attachmentFileName,
+        filePath: attachmentPathBase64,
+        contentType: attachmentContentType,
+        fileSize: attachmentFileSize,
+        thumbnailPath: attachmentThumbnailPath,
+        type: attachmentType
+      });
+    }
+
+    const currentReplyTo = replyTo;
+
     const body = {
       chatId: parseInt(activeChat.id),
-      content: attachmentCaption,
-      type: attachmentType,
-      attachments: [
-        {
-          fileName: attachmentFileName,
-          filePath: attachmentPathBase64,  // Serialized Base64 string represents the path/data
-          contentType: attachmentContentType,
-          fileSize: attachmentFileSize,
-          thumbnailPath: attachmentThumbnailPath
-        }
-      ]
+      content: attachmentCaption || "",
+      type: attachmentsToSend.length === 1 ? attachmentsToSend[0].type : MessageType.File,
+      attachments: attachmentsToSend,
+      replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0
     };
 
+    const tempId = "attach-temp-" + Date.now().toString();
+
+    // Create a local optimistic message displaying base64 previews
+    const optimisticMessage = {
+      id: tempId,
+      text: attachmentCaption || "",
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: new Date().toISOString(),
+      isMe: true,
+      senderName: 'You',
+      type: body.type === MessageType.Image ? 'image' : body.type === MessageType.Audio ? 'audio' : body.type === MessageType.Video ? 'video' : 'text',
+      attachments: attachmentsToSend.map((att, idx) => ({
+        id: idx.toString(),
+        fileName: att.fileName,
+        filePath: att.filePath, // Base64 content for local preview
+        contentType: att.contentType,
+        fileSize: att.fileSize,
+        type: att.type
+      })),
+      replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0,
+      pending: true
+    };
+
+    // Update UI list immediately with optimistic message
+    setMessages(prev => [...prev, optimisticMessage]);
+    setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+
+    // Reset modals and form inputs immediately so user doesn't wait on upload
     setShowAttachmentModal(false);
+    setMediaPreviews([]);
+    setMediaActiveIndex(0);
+    setAttachmentFileName('');
+    setAttachmentContentType('');
+    setAttachmentFileSize(0);
+    setAttachmentPathBase64('');
+    setAttachmentThumbnailPath('');
+    setAttachmentCaption('');
+    setReplyTo(null);
+
     setIsSendingMessage(true);
 
     try {
@@ -1177,116 +2407,150 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       console.log('SendAttachment Dto Success:', res);
       if (res) {
         setMessages(prev => {
-          const msgId = (res.id || res.Id)?.toString();
-          if (!msgId || prev.some(m => m.id === msgId)) return prev;
-          const mapped = {
-            id: msgId,
-            text: res.content || res.Content || attachmentCaption || attachmentFileName,
+          // Replace tempId with server response
+          const next = prev.map(m => m.id === tempId ? {
+            ...m,
+            id: (res.id || res.Id)?.toString(),
+            text: res.content || res.Content || m.text,
             time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: res.sentAt || res.SentAt || new Date().toISOString(),
-            isMe: true,
-            senderName: res.senderName || res.SenderName || 'You',
-            type: res.type === MessageType.Image ? 'image' : res.type === MessageType.Audio ? 'audio' : 'text',
+            sentAt: res.sentAt || res.SentAt || m.sentAt,
+            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            pending: false,
             mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
             attachments: res.attachments || []
-          };
-          const next = [...prev, mapped];
-          saveData(STORES.MESSAGES, { chatId: activeChat.id, list: next }).catch(() => {});
+          } : m);
+          saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
-        setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      } else {
+        // Mark failed or remove
+        setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err) {
-      console.error("API error sending attachment, showing locally:", err);
-      // Local optimistic update fallback
-      setMessages(prev => [...prev, {
-        id: Math.random().toString(),
-        text: attachmentCaption || attachmentFileName,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sentAt: new Date().toISOString(),
-        isMe: true,
-        senderName: 'You',
-        type: attachmentType === MessageType.Image ? 'image' : 'text',
-        mediaUrl: attachmentPathBase64
-      }]);
-      setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      console.error("API error sending attachment, keeping optimistic with failed state:", err);
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, error: true, pending: false } : m));
     } finally {
       setIsSendingMessage(false);
-      handleCancelAttachment();
     }
   };
 
   // Recording audio voice message
   const handleSendVoiceMessage = async (durationSecs: number, audioBlob?: Blob, base64Audio?: string) => {
     if (!activeChat) return;
-    try {
-      // Improved mock string that is valid base64
-      const audioPath = base64Audio || ("data:audio/webm;base64,GkXfo69Chu1" + "A".repeat(Math.max(0, 100 - durationSecs)) + "==");
+    
+    // Improved mock string that is valid base64 with audio/mpeg (MP3) prefix
+    const audioPath = base64Audio || ("data:audio/mpeg;base64,GkXfo69Chu1" + "A".repeat(Math.max(0, 100 - durationSecs)) + "==");
       
+    const tempId = "voice-temp-" + Date.now().toString();
+    const currentReplyTo = replyTo;
+
+    // Create a local optimistic voice message
+    const optimisticMessage = {
+      id: tempId,
+      text: '',
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: new Date().toISOString(),
+      isMe: true,
+      senderName: 'You',
+      type: 'audio',
+      duration: durationSecs,
+      mediaUrl: base64Audio || audioPath,
+      attachments: [
+        {
+          id: "0",
+          fileName: 'audio_voice_note.mp3',
+          filePath: base64Audio || audioPath,
+          contentType: 'audio/mpeg',
+          fileSize: audioBlob ? audioBlob.size : durationSecs * 1024,
+          type: MessageType.Audio
+        }
+      ],
+      replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0,
+      pending: true
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+    setReplyTo(null);
+    setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+
+    try {
       const body = {
         chatId: parseInt(activeChat.id),
         content: '',
         type: MessageType.Audio,
         attachments: [
           {
-            fileName: 'audio_voice_note.webm',
-            filePath: audioBlob || audioPath,
-            contentType: 'audio/webm',
+            fileName: 'audio_voice_note.mp3',
+            filePath: audioBlob || base64Audio || audioPath,
+            contentType: 'audio/mpeg',
             fileSize: audioBlob ? audioBlob.size : durationSecs * 1024,
-            thumbnailPath: ''
+            thumbnailPath: '',
+            type: MessageType.Audio
           }
-        ]
+        ],
+        replyToMessageId: currentReplyTo ? parseInt(currentReplyTo.id) : 0
       };
       
       const res = await sendMessage(body);
       console.log('Send Voice Message Success', res);
       if (res) {
         setMessages(prev => {
-          const msgId = (res.id || res.Id)?.toString();
-          if (!msgId || prev.some(m => m.id === msgId)) return prev;
-          const mapped = {
-            id: msgId,
-            text: res.content || res.Content || '',
+          const next = prev.map(m => m.id === tempId ? {
+            ...m,
+            id: (res.id || res.Id)?.toString(),
             time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: res.sentAt || res.SentAt || new Date().toISOString(),
-            isMe: true,
-            senderName: res.senderName || res.SenderName || 'You',
-            type: 'audio',
-            duration: durationSecs,
-            mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
+            sentAt: res.sentAt || res.SentAt || m.sentAt,
+            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            pending: false,
+            mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : m.mediaUrl,
             attachments: res.attachments || []
-          };
-          const next = [...prev, mapped];
-          saveData(STORES.MESSAGES, { chatId: activeChat.id, list: next }).catch(() => {});
+          } : m);
+          saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
-        setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      } else {
+        // Mark failed or remove
+        setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err) {
-      console.error("API voice note err, local mock:", err);
-      setMessages(prev => [...prev, {
-        id: Math.random().toString(),
-        text: '',
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sentAt: new Date().toISOString(),
-        isMe: true,
-        senderName: 'You',
-        type: 'audio',
-        duration: durationSecs,
-        mediaUrl: base64Audio
-      }]);
-      setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
+      console.error("API voice note err, local mock failed state:", err);
+      setMessages(prev => prev.map(m => m.id === tempId ? { ...m, error: true, pending: false } : m));
     }
   };
 
   const startRecordingAudio = async () => {
+    triggerHaptic('medium');
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         throw new Error("Recording not supported in this browser");
       }
+      playNotificationSound('recording');
+
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'paused') {
+        mediaRecorderRef.current.resume();
+        setIsRecording(true);
+        setRecordingState('recording');
+        handleLocalUserTyping('recording voice message');
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setRecordingStream(stream);
       audioChunksRef.current = [];
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      
+      let mimeType = 'audio/webm';
+      if (MediaRecorder.isTypeSupported('audio/webm')) {
+        mimeType = 'audio/webm';
+      } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+        mimeType = 'audio/ogg';
+      } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+        mimeType = 'audio/mp4';
+      } else if (MediaRecorder.isTypeSupported('audio/wav')) {
+        mimeType = 'audio/wav';
+      }
+      
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
       
       mediaRecorder.ondataavailable = (event) => {
         if (event.data && event.data.size > 0) {
@@ -1294,39 +2558,173 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      mediaRecorder.onstop = () => {
+        const segmentBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        setRecordedBlobs(prev => [...prev, segmentBlob]);
         stream.getTracks().forEach(track => track.stop());
-        
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          const base64Audio = reader.result as string;
-          await handleSendVoiceMessage(recordingDuration, audioBlob, base64Audio);
-          setRecordingDuration(0);
-        };
       };
 
-      mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
-      setRecordingDuration(0);
+      setRecordingState('recording');
+      handleLocalUserTyping('recording voice message');
     } catch (err: any) {
-      console.warn("Could not start physical mic recording, fallback to simulated duration:", err);
+      console.warn("Could not start physical mic recording:", err);
       setIsRecording(true);
-      setRecordingDuration(0);
+      setRecordingState('recording');
+      handleLocalUserTyping('recording voice message');
     }
   };
 
-  const stopRecordingAudio = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    } else {
-      setIsRecording(false);
-      handleSendVoiceMessage(recordingDuration);
-      setRecordingDuration(0);
+  const pauseRecordingAudio = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+      mediaRecorderRef.current.pause();
+      setRecordingState('paused');
     }
+  };
+
+  const deleteRecordingAudio = () => {
+    triggerHaptic('medium');
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      try {
+        mediaRecorderRef.current.stop();
+      } catch (e) {}
+    }
+    if (recordingStream) {
+      try {
+        recordingStream.getTracks().forEach(track => track.stop());
+      } catch (e) {}
+      setRecordingStream(null);
+    }
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewIntervalRef.current) {
+      clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = null;
+    }
+    
+    setIsRecording(false);
+    setRecordingState('idle');
+    setRecordedBlobs([]);
+    setRecordingDuration(0);
+    setIsPreviewPlaying(false);
+    setPreviewCurrentTime(0);
+  };
+
+  const handleTogglePreviewPlay = () => {
+    triggerHaptic('light');
+    if (isPreviewPlaying) {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+      }
+      setIsPreviewPlaying(false);
+      if (previewIntervalRef.current) {
+        clearInterval(previewIntervalRef.current);
+        previewIntervalRef.current = null;
+      }
+    } else {
+      const combinedBlob = new Blob(recordedBlobs, { type: 'audio/mpeg' });
+      const url = URL.createObjectURL(combinedBlob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+
+      audio.currentTime = previewCurrentTime >= recordingDuration ? 0 : previewCurrentTime;
+      audio.play().catch(e => console.warn("Failed to play preview audio:", e));
+      setIsPreviewPlaying(true);
+
+      if (previewIntervalRef.current) clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = window.setInterval(() => {
+        if (audio.ended) {
+          setIsPreviewPlaying(false);
+          setPreviewCurrentTime(0);
+          if (previewIntervalRef.current) {
+            clearInterval(previewIntervalRef.current);
+            previewIntervalRef.current = null;
+          }
+        } else {
+          setPreviewCurrentTime(audio.currentTime);
+        }
+      }, 100);
+    }
+  };
+
+  const sendRecordedVoiceMessage = async () => {
+    triggerHaptic('light');
+    if (recordingState === 'recording') {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        mediaRecorderRef.current.onstop = async () => {
+          let mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+          const finalSegmentBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const allBlobs = [...recordedBlobs, finalSegmentBlob];
+          await processAndSendVoiceBlobs(allBlobs);
+        };
+        mediaRecorderRef.current.stop();
+      } else {
+        await processAndSendVoiceBlobs(recordedBlobs);
+      }
+    } else {
+      await processAndSendVoiceBlobs(recordedBlobs);
+    }
+  };
+
+  const processAndSendVoiceBlobs = async (blobsToCombine: Blob[]) => {
+    if (previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+    }
+    if (previewIntervalRef.current) {
+      clearInterval(previewIntervalRef.current);
+      previewIntervalRef.current = null;
+    }
+
+    if (blobsToCombine.length === 0) {
+      if (recordingStream) {
+        try {
+          recordingStream.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        setRecordingStream(null);
+      }
+      setIsRecording(false);
+      setRecordingState('idle');
+      setRecordingDuration(0);
+      return;
+    }
+
+    const finalBlob = new Blob(blobsToCombine, { type: 'audio/mpeg' });
+    
+    const reader = new FileReader();
+    reader.readAsDataURL(finalBlob);
+    reader.onloadend = async () => {
+      let base64Audio = reader.result as string;
+      if (base64Audio.startsWith('data:audio/webm')) {
+        base64Audio = base64Audio.replace('data:audio/webm', 'data:audio/mpeg');
+      } else if (base64Audio.startsWith('data:video/webm')) {
+        base64Audio = base64Audio.replace('data:video/webm', 'data:audio/mpeg');
+      } else if (base64Audio.startsWith('data:audio/ogg')) {
+        base64Audio = base64Audio.replace('data:audio/ogg', 'data:audio/mpeg');
+      }
+
+      await handleSendVoiceMessage(recordingDuration, finalBlob, base64Audio);
+      
+      if (recordingStream) {
+        try {
+          recordingStream.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        setRecordingStream(null);
+      }
+      setIsRecording(false);
+      setRecordingState('idle');
+      setRecordedBlobs([]);
+      setRecordingDuration(0);
+      setIsPreviewPlaying(false);
+      setPreviewCurrentTime(0);
+    };
+  };
+
+  const stopRecordingAudio = () => {
+    sendRecordedVoiceMessage();
   };
 
   // Edit Message
@@ -1401,12 +2799,12 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   const lastTypingSentRef = useRef<number>(0);
 
   // Send typing status throttled at once per 10 seconds while typing
-  const handleUserTyping = () => {
+  const handleLocalUserTyping = (action: string = 'typing') => {
     if (!activeChat) return;
     const now = Date.now();
-    if (now - lastTypingSentRef.current > 10000) {
+    if (now - lastTypingSentRef.current > 10000 || action !== 'typing') {
       lastTypingSentRef.current = now;
-      sendTypingStatus(parseInt(activeChat.id)).catch(err => {
+      sendTypingStatus(parseInt(activeChat.id), action).catch(err => {
         console.warn("Typing API endpoint returned error:", err.message);
       });
     }
@@ -1420,6 +2818,9 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   const handleMessagesScroll = () => {
     const container = scrollRef.current;
     if (!container) return;
+
+    const isAtBottom = container.scrollHeight - container.scrollTop <= container.clientHeight + 100;
+    setShowScrollButton(!isAtBottom);
 
     // Find all message items in view
     const messageElements = container.querySelectorAll("[id^='msg-']");
@@ -1453,6 +2854,12 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           setShowDateBadge(false);
         }, 1500);
       }
+    }
+  };
+
+  const scrollToBottom = () => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }
   };
 
@@ -1517,6 +2924,9 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           id: msg.id, 
           text: msg.text || (msg.type === 'image' ? 'Image File' : 'Voice Message') 
         });
+        setTimeout(() => {
+          messageInputRef.current?.focus();
+        }, 100);
         
         // Auto pull-back after triggering reply animation
         setTimeout(() => {
@@ -1778,7 +3188,50 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     }
   };
 
-  const overlayMsg = overlayMessageId ? messages.find(m => m.id === overlayMessageId) : null;
+  const rawOverlayMsg = overlayMessageId ? messages.find(m => String(m.id) === String(overlayMessageId)) : null;
+  const overlayMsg = useMemo(() => {
+    if (!rawOverlayMsg) return null;
+    const replyId = rawOverlayMsg.replyToMessageId || rawOverlayMsg.ReplyToMessageId || rawOverlayMsg.replyTo?.id || rawOverlayMsg.ReplyTo?.Id;
+    if (replyId && replyId !== 0 && replyId !== '0') {
+      const refMsg = messages.find(m => String(m.id) === String(replyId));
+      if (refMsg) {
+        return {
+          ...rawOverlayMsg,
+          replyTo: {
+            id: String(replyId),
+            text: refMsg.text || (refMsg.type === 'image' ? 'Image File 📷' : refMsg.type === 'audio' ? 'Voice Message 🎵' : 'Attachment 📄')
+          }
+        };
+      } else {
+        const fallbackText = rawOverlayMsg.replyTo?.text || rawOverlayMsg.ReplyTo?.Text || rawOverlayMsg.replyTo?.content || rawOverlayMsg.ReplyTo?.Content || 'Referenced Message 📄';
+        return {
+          ...rawOverlayMsg,
+          replyTo: {
+            id: String(replyId),
+            text: fallbackText
+          }
+        };
+      }
+    }
+    return rawOverlayMsg;
+  }, [rawOverlayMsg, messages]);
+
+  const exportChatHistory = () => {
+    if (!activeChat) return;
+    const history = messages.map(msg => {
+      const time = new Date(msg.sentAt).toLocaleString();
+      const sender = msg.isMe ? 'Me' : msg.senderName;
+      return `[${time}] ${sender}: ${msg.text || (msg.type === 'image' ? '[Image]' : msg.type === 'audio' ? '[Voice Message]' : '[Attachment]')}`;
+    }).join('\n');
+
+    const blob = new Blob([history], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `chat_export_${activeChat.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="h-full flex flex-col bg-[#F0F2F5] dark:bg-[#0c0c0e] text-zinc-800 dark:text-zinc-200 relative">
@@ -1789,7 +3242,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -10 }}
-            className="flex flex-col h-full absolute inset-0 pb-16"
+            className="flex flex-col h-full w-full relative pb-0"
           >
             <div className="p-5 pb-2">
               <div className="flex items-center justify-between mb-4">
@@ -1890,7 +3343,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                               setActiveChat({
                                 id: res.id.toString(),
                                 name: res.name || chat.name,
-                                lastMessage: res.lastMessage?.content || chat.lastMessage,
+                                lastMessage: res.lastMessage ? getDescriptiveLastMessage(res.lastMessage) : chat.lastMessage,
                                 time: res.lastMessage?.sentAt ? new Date(res.lastMessage.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : chat.time,
                                 unread: res.unreadCount || 0,
                                 isGroup: !!res.isGroup,
@@ -1922,7 +3375,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                           });
                           const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
                           const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
-                          const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                          const partnerImg = chat.imageUrl || chat.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
                           const partnerName = personDetails?.name || personDetails?.Name || chat.name;
                           return partnerImg ? (
                             <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
@@ -1956,7 +3409,14 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       <div className="flex justify-between items-center">
                         {typingUsers[chat.id] && typingUsers[chat.id].length > 0 ? (
                           <p className="text-xs text-green-600 font-bold truncate pr-2 animate-pulse">
-                            {!chat.isGroup ? <span className="italic">Typing...</span> : `${typingUsers[chat.id].join(', ')} typing...`}
+                            {(() => {
+                               const recording = typingUsers[chat.id].filter(t => t.action?.includes('recording'));
+                               const typing = typingUsers[chat.id].filter(t => !t.action?.includes('recording'));
+                               if (recording.length > 0) {
+                                  return !chat.isGroup ? <span className="italic">Recording voice note...</span> : `${recording.map(t=>t.name).join(', ')} recording...`;
+                               }
+                               return !chat.isGroup ? <span className="italic">Typing...</span> : `${typing.map(t=>t.name).join(', ')} typing...`;
+                            })()}
                           </p>
                         ) : (
                           <p className="text-xs text-zinc-600 truncate pr-2 dark:text-zinc-400">
@@ -2023,7 +3483,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                        });
                        const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
-                       const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                       const partnerImg = activeChat.imageUrl || activeChat.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
                        const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
                        return partnerImg ? (
                          <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
@@ -2070,13 +3530,54 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 {/* Info Button to Open Group Details */}
                 <button 
                   onClick={() => setShowChatInfo(true)}
-                  className="p-2 text-zinc-400 hover:text-zinc-800 hover:bg-zinc-50 rounded-full transition-all"
+                  className="p-2 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-all"
                   title={activeChat.isGroup ? "View Group Details" : "View Chat Info"}
                 >
                   <Info size={20} />
                 </button>
+
+                {/* Search Button */}
+                <button 
+                  onClick={() => setIsSearchingMessages(prev => !prev)}
+                  className={`p-2 rounded-full transition-all ${isSearchingMessages ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40' : 'text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                  title="Search Messages"
+                >
+                  <Search size={20} />
+                </button>
               </div>
             </header>
+
+            {/* Slide-down Message Search Bar */}
+            {isSearchingMessages && (
+              <div className="bg-white dark:bg-[#1c1c1e] border-b border-zinc-200 dark:border-zinc-800 px-4 py-2.5 flex items-center gap-2 animate-fade-in z-20">
+                <Search size={16} className="text-zinc-400 shrink-0" />
+                <input 
+                  type="text"
+                  placeholder="Search messages..."
+                  value={messageSearchQuery}
+                  onChange={(e) => setMessageSearchQuery(e.target.value)}
+                  className="w-full text-xs bg-transparent focus:outline-none text-zinc-800 dark:text-zinc-200 placeholder-zinc-400"
+                  autoFocus
+                />
+                {messageSearchQuery && (
+                  <button 
+                    onClick={() => setMessageSearchQuery('')}
+                    className="p-1 text-zinc-400 hover:text-zinc-605 rounded-full"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+                <button 
+                  onClick={() => {
+                    setIsSearchingMessages(false);
+                    setMessageSearchQuery('');
+                  }}
+                  className="text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 font-semibold"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
 
              {/* Sticky/Floating scroll date indicator showing the day of the message being scrolled through */}
             {showDateBadge && activeScrollDate && (
@@ -2104,7 +3605,36 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 </div>
               ) : (
                 (() => {
-                  const sorted = [...messages].sort((a, b) => {
+                  // Resolve replyTo references from messages array
+                  const resolved = messages.map(msg => {
+                    const replyObj = msg.replyTo || msg.ReplyTo;
+                    const replyId = msg.replyToMessageId || msg.ReplyToMessageId || replyObj?.id || replyObj?.Id;
+                    const hasReply = (replyId && replyId !== 0 && replyId !== '0' && replyId !== 'null' && replyId !== 'undefined') || replyObj;
+                    
+                    if (hasReply) {
+                      const finalReplyId = replyId ? String(replyId) : '0';
+                      // Try to find referenced message in the loaded list
+                      const refMsg = messages.find(m => String(m.id) === finalReplyId);
+                      
+                      let displayText = 'Referenced Message 📄';
+                      if (refMsg) {
+                        displayText = refMsg.text || (refMsg.type === 'image' ? 'Image File 📷' : refMsg.type === 'audio' ? 'Voice Message 🎵' : 'Attachment 📄');
+                      } else if (replyObj) {
+                        displayText = replyObj.text || replyObj.Text || replyObj.content || replyObj.Content || 'Referenced Message 📄';
+                      }
+                      
+                      return {
+                        ...msg,
+                        replyTo: {
+                          id: finalReplyId,
+                          text: displayText
+                        }
+                      };
+                    }
+                    return msg;
+                  });
+
+                  const sorted = [...resolved].sort((a, b) => {
                     const dateA = new Date(a.sentAt || a.SentAt || 0).getTime();
                     const dateB = new Date(b.sentAt || b.SentAt || 0).getTime();
                     if (dateA !== dateB) return dateA - dateB;
@@ -2113,12 +3643,45 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     return senderIdA - senderIdB;
                   });
 
+                  const filtered = messageSearchQuery.trim()
+                    ? sorted.filter(m => m.text?.toLowerCase().includes(messageSearchQuery.toLowerCase()))
+                    : sorted;
+
+                  if (messageSearchQuery.trim() && filtered.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
+                        <Search size={32} className="text-zinc-300 dark:text-zinc-700 mb-2 animate-bounce" />
+                        <p className="text-xs font-semibold">No messages found matching "{messageSearchQuery}"</p>
+                      </div>
+                    );
+                  }
+
+                  const myParticipant = activeChat ? (activeChat.participants || []).find(
+                    (p: any) => Number(p.personId || p.PersonId || p.id || p.Id) === Number(currentUserId)
+                  ) : null;
+                  const myReadAt = myParticipant ? (myParticipant.lastReadAt || myParticipant.LastReadAt) : null;
+                  
+                  let firstUnreadId: string | null = null;
+                  if (myReadAt && !messageSearchQuery.trim()) {
+                    const myReadTime = new Date(myReadAt).getTime();
+                    const firstUnread = sorted.find(m => {
+                      if (m.isMe) return false;
+                      const sentTime = new Date(m.sentAt || m.SentAt || 0).getTime();
+                      return sentTime > myReadTime;
+                    });
+                    if (firstUnread) {
+                      firstUnreadId = String(firstUnread.id);
+                    }
+                  }
+
                   let lastDateStr = '';
-                  return sorted.map((msg) => {
+                  return filtered.map((msg) => {
                     const msgDate = msg.sentAt ? new Date(msg.sentAt) : new Date();
                     const msgDateStr = msgDate.toDateString();
                     const showDivider = msgDateStr !== lastDateStr;
                     lastDateStr = msgDateStr;
+
+                    const showUnreadBanner = firstUnreadId && String(msg.id) === firstUnreadId;
 
                     return (
                       <React.Fragment key={msg.id}>
@@ -2130,6 +3693,15 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                             </span>
                           </div>
                         )}
+
+                        {showUnreadBanner && (
+                          <div className="flex justify-center my-4 select-none animate-fade-in w-full">
+                            <span className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 px-4 py-1.5 text-red-600 dark:text-red-400 text-[10px] font-bold rounded shadow-sm uppercase tracking-wider flex items-center gap-1.5">
+                              Unread Messages
+                            </span>
+                          </div>
+                        )}
+
                         <div className={`flex w-full ${msg.isMe ? 'justify-end' : 'justify-start'}`}>
                           <div 
                             id={`msg-${msg.id}`}
@@ -2144,12 +3716,13 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                             onContextMenu={(e) => e.preventDefault()}
                             style={{
                               transform: swipingMessageId === String(msg.id) ? `translateX(${swipeOffset}px)` : 'none',
-                              transition: swipingMessageId === String(msg.id) ? 'none' : 'transform 150ms cubic-bezier(0.16, 1, 0.3, 1)'
+                              transition: swipingMessageId === String(msg.id) ? 'none' : 'transform 150ms cubic-bezier(0.16, 1, 0.3, 1)',
+                              ...(highlightedMessageId === String(msg.id) ? {} : (msg.isMe ? { backgroundColor: chatThemeColor, borderColor: chatThemeColor } : {}))
                             }}
                             className={`p-2.5 rounded-md shadow-sm max-w-[90%] inline-block relative border cursor-pointer select-none transition-all duration-300 active:scale-[0.99] ${
                               highlightedMessageId === String(msg.id)
                                 ? 'bg-yellow-105 border-yellow-405 ring-4 ring-yellow-400/50 scale-[1.02] shadow-md animate-pulse'
-                                : (msg.isMe ? 'bg-[#DCF8C6] border-[#DCF8C6] dark:bg-emerald-950 dark:border-emerald-900 dark:text-emerald-100' : 'bg-white border-zinc-200 dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-zinc-200 shadow-sm')
+                                : (msg.isMe ? 'text-white' : 'bg-white border-zinc-200 dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-zinc-200 shadow-sm')
                             } ${msg.isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}
                           >
                             
@@ -2163,64 +3736,68 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                   e.stopPropagation();
                                   handleReplyClick(String(msg.replyTo!.id));
                                 }}
-                        className="mb-2 p-2 bg-black/5 hover:bg-black/10 border-l-4 border-emerald-500 rounded text-xs text-zinc-600 truncate cursor-pointer transition-colors select-none"
-                        title="Click to view referenced message"
-                      >
-                        {msg.replyTo.text}
-                      </div>
-                    )}
+                                className="mb-2 p-2 bg-black/5 hover:bg-black/10 border-l-4 border-emerald-500 rounded text-xs text-zinc-650 dark:text-zinc-300 truncate cursor-pointer transition-colors select-none"
+                                title="Click to view referenced message"
+                              >
+                                {msg.replyTo.text}
+                              </div>
+                            )}
 
-                    {editingMessageId === msg.id ? (
-                      <div className="flex flex-col gap-2 min-w-[200px]">
-                        <input 
-                          type="text" 
-                          value={editingText} 
-                          onChange={(e) => setEditingText(e.target.value)} 
-                          className="w-full text-xs p-1 border border-zinc-300 rounded focus:outline-none focus:border-emerald-500 text-black font-semibold"
-                          autoFocus
-                        />
-                        <div className="flex gap-1.5 justify-end">
-                          <button onClick={() => setEditingMessageId(null)} className="text-[10px] text-zinc-500 hover:underline">Cancel</button>
-                          <button onClick={handleSaveEdit} className="text-[10px] text-emerald-600 font-bold hover:underline">Save</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {msg.type === 'text' && (
-                          <p className="text-xs text-zinc-800 dark:text-zinc-200 break-words font-medium">{msg.text}</p>
-                        )}
-                        
-                        {msg.type === 'image' && (msg.mediaUrl || msg.attachments?.length > 0) && (
-                          <div className="flex flex-col gap-1">
-                            <img src={msg.mediaUrl || msg.attachments[0].fileUrl || msg.attachments[0].filePath} alt="attachment" className="rounded-sm max-h-48 object-cover max-w-full" referrerPolicy="no-referrer" />
-                            {msg.text && <p className="text-xs text-zinc-800 dark:text-zinc-200 pt-1">{msg.text}</p>}
+                            {editingMessageId === msg.id ? (
+                              <div className="flex flex-col gap-2 min-w-[200px]">
+                                <input 
+                                  type="text" 
+                                  value={editingText} 
+                                  onChange={(e) => setEditingText(e.target.value)} 
+                                  className="w-full text-xs p-1 border border-zinc-300 rounded focus:outline-none focus:border-emerald-500 text-black font-semibold"
+                                  autoFocus
+                                />
+                                <div className="flex gap-1.5 justify-end">
+                                  <button onClick={() => setEditingMessageId(null)} className="text-[10px] text-zinc-500 hover:underline">Cancel</button>
+                                  <button onClick={handleSaveEdit} className="text-[10px] text-emerald-600 font-bold hover:underline">Save</button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                {msg.attachments && msg.attachments.length > 0 ? (
+                                  <div className="flex flex-col gap-2 max-w-sm">
+                                    {renderMsgAttachments(msg)}
+                                    {msg.text && <p className={`text-xs pt-1 break-words font-medium ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>}
+                                  </div>
+                                ) : (
+                                  msg.type === 'text' && (
+                                    <p className={`text-xs break-words font-medium ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>
+                                  )
+                                )}
+                                
+                                {msg.type === 'audio' && !msg.attachments?.length && (
+                                  <VoicePlayer mediaUrl={msg.mediaUrl} duration={msg.duration} />
+                                )}
+                              </>
+                            )}
+
+                            <div className={`flex justify-between items-center gap-4 mt-1.5 w-full ${msg.isMe ? 'text-white/80' : 'text-zinc-500'}`}>
+                              
+                              <div className="flex items-center gap-1 ml-auto shrink-0 whitespace-nowrap">
+                                <p className="text-[9px] font-semibold uppercase shrink-0 whitespace-nowrap">{msg.time}</p>
+                                {msg.isMe && (
+                                  msg.pending ? (
+                                    <Clock size={11} className="text-white/60 animate-pulse shrink-0" />
+                                  ) : msg.status === 'failed' ? (
+                                    <AlertCircle size={12} className="text-red-500 shrink-0" />
+                                  ) : (
+                                    <CheckCheck size={12} className={`${getMessageTickColor(msg)} shrink-0`} />
+                                  )
+                                )}
+                              </div>
+                            </div>
+                            {/* Small tail */}
+                            <div className={`absolute top-0 w-2.5 h-2.5 ${msg.isMe ? '-right-2.5' : '-left-2.5 bg-white dark:bg-[#1c1c1e]'}`} style={{ clipPath: msg.isMe ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 0 0, 100% 100%)', backgroundColor: msg.isMe ? chatThemeColor : undefined }}></div>
                           </div>
-                        )}
-                        
-                        {msg.type === 'audio' && (
-                          <VoicePlayer mediaUrl={msg.mediaUrl} duration={msg.duration} />
-                        )}
-                      </>
-                    )}
-
-                    <div className={`flex justify-between items-center gap-4 mt-1.5 w-full ${msg.isMe ? 'text-emerald-700/80' : 'text-zinc-500'}`}>
-                      
-                      <div className="flex items-center gap-1 ml-auto shrink-0 whitespace-nowrap">
-                        <p className="text-[9px] font-semibold uppercase shrink-0 whitespace-nowrap">{msg.time}</p>
-                        {msg.status === 'failed' ? (
-                          <AlertCircle size={12} className="text-red-500 shrink-0" />
-                        ) : (
-                          <CheckCheck size={12} className={(msg.isMe && (!activeChat.unread || activeChat.unread === 0)) ? "text-[#53bdeb] shrink-0" : "text-zinc-400 shrink-0"} />
-                        )}
-                      </div>
-                    </div>
-                    {/* Small tail */}
-                    <div className={`absolute top-0 w-2.5 h-2.5 ${msg.isMe ? '-right-2.5 bg-[#DCF8C6] dark:bg-emerald-950' : '-left-2.5 bg-white dark:bg-[#1c1c1e]'}`} style={{ clipPath: msg.isMe ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 0 0, 100% 100%)' }}></div>
-                  </div>
-                </div>
-              </React.Fragment>
-            );
-          });
+                        </div>
+                      </React.Fragment>
+                    );
+                  });
         })()
       )}
               
@@ -2241,6 +3818,17 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
               </div>
             </div>
 
+            {showScrollButton && (
+              <button 
+                onClick={scrollToBottom}
+                className="absolute bottom-24 right-6 w-11 h-11 flex flex-col items-center justify-center bg-white dark:bg-zinc-800 rounded-full shadow-lg z-30 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all border border-zinc-200 dark:border-zinc-700 animate-bounce cursor-pointer hover:scale-105 active:scale-95"
+              >
+                <ChevronDown size={14} className="-mb-2.5 text-emerald-500 shrink-0" />
+                <ChevronDown size={14} className="-mb-2.5 text-emerald-500 opacity-75 shrink-0" />
+                <ChevronDown size={14} className="text-emerald-500 opacity-50 shrink-0" />
+              </button>
+            )}
+
             {/* Interactive File Attachment Fields Auto-Fill Modal */}
             <AnimatePresence>
               {showAttachmentModal && (
@@ -2256,22 +3844,98 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     <div className="w-10"></div>
                   </header>
 
-                  <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center gap-6 select-none bg-transparent text-white">
-                    {attachmentType === MessageType.Image && attachmentPathBase64 ? (
-                      <div className="flex flex-col items-center gap-3 animate-scale-up">
-                        <img src={attachmentPathBase64} alt="attachment-preview" className="rounded-2xl max-h-64 object-contain shadow-2xl border border-white/15" />
-                        <span className="text-xs text-white/80 font-black tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full border border-white/10">{attachmentFileName || "Attached Image"}</span>
+                  <div className="flex-1 overflow-y-auto p-8 flex flex-col items-center justify-center gap-6 select-none bg-transparent text-white animate-fade-in">
+                    {mediaPreviews.length > 1 ? (
+                      <div className="flex flex-col items-center gap-4 w-full max-w-lg">
+                        {/* 1. Large Center Preview of active index */}
+                        {(() => {
+                          const activeItem = mediaPreviews[mediaActiveIndex];
+                          if (!activeItem) return null;
+                          return (
+                            <div className="flex flex-col items-center gap-2 animate-scale-up w-full">
+                              {activeItem.type === MessageType.Image ? (
+                                <img src={activeItem.pathBase64 || undefined} alt="active-preview" className="rounded-2xl max-h-56 object-contain shadow-2xl border border-white/15" />
+                              ) : (
+                                <video src={activeItem.pathBase64 || undefined} controls className="rounded-2xl max-h-56 w-full object-contain shadow-2xl border border-white/15" />
+                              )}
+                              <span className="text-xs text-white/80 font-black tracking-widest uppercase bg-black/40 px-3 py-1.5 rounded-full border border-white/10 truncate max-w-xs">{activeItem.fileName}</span>
+                            </div>
+                          );
+                        })()}
+
+                        {/* 2. Thumbnail carousel */}
+                        <div className="flex gap-2 items-center overflow-x-auto py-2 px-4 w-full justify-center bg-black/25 rounded-2xl border border-white/5 max-w-sm">
+                          {mediaPreviews.map((p, idx) => {
+                            const isActive = idx === mediaActiveIndex;
+                            return (
+                              <button 
+                                key={idx}
+                                onClick={() => {
+                                  setMediaActiveIndex(idx);
+                                  // Update fallback state variables for safety
+                                  setAttachmentFileName(p.fileName);
+                                  setAttachmentContentType(p.contentType);
+                                  setAttachmentFileSize(p.fileSize);
+                                  setAttachmentPathBase64(p.pathBase64);
+                                  setAttachmentType(p.type);
+                                }}
+                                className={`w-12 h-12 rounded-xl overflow-hidden border-2 shrink-0 relative transition-all ${
+                                  isActive ? 'border-[#53bdeb] scale-105 shadow-md' : 'border-white/20 hover:border-white/50 opacity-70 hover:opacity-100'
+                                }`}
+                              >
+                                {p.type === MessageType.Image ? (
+                                  <img src={p.pathBase64 || undefined} alt="thumb" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full relative">
+                                    <video src={p.pathBase64 || undefined} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center">
+                                      <Play size={14} className="text-white" fill="currentColor" />
+                                    </div>
+                                  </div>
+                                )}
+                                <div 
+                                  onClick={(e) => deletePreviewItem(e, idx)}
+                                  className="absolute top-0.5 right-0.5 w-4 h-4 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center text-white cursor-pointer z-10 transition-all hover:scale-110 shadow-md"
+                                  title="Delete preview"
+                                >
+                                  <X size={10} className="stroke-[3]" />
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                        
+                        <div className="text-[10px] text-zinc-300 uppercase tracking-widest font-bold">
+                          Selected {mediaPreviews.length} Media Files
+                        </div>
                       </div>
                     ) : (
-                      <div className="flex flex-col items-center gap-4 animate-scale-up">
-                        <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center border border-white/15 text-[#53bdeb] shadow-xl">
-                          <Paperclip size={40} />
+                      attachmentType === MessageType.Image && attachmentPathBase64 ? (
+                        <div className="flex flex-col items-center gap-3 animate-scale-up">
+                          <img src={attachmentPathBase64 || undefined} alt="attachment-preview" className="rounded-2xl max-h-64 object-contain shadow-2xl border border-white/15" />
+                          <span className="text-xs text-white/80 font-black tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full border border-white/10">{attachmentFileName || "Attached Image"}</span>
                         </div>
-                        <span className="text-sm text-white font-heavy bg-black/50 px-4 py-2 rounded-full border border-white/10 tracking-wider">{attachmentFileName || "Attached File"}</span>
-                        {attachmentFileSize > 0 && (
-                          <span className="text-[10px] text-zinc-300 font-mono font-bold tracking-wider bg-black/35 px-2.5 py-1 rounded-md">{(attachmentFileSize / 1024).toFixed(1)} KB</span>
-                        )}
-                      </div>
+                      ) : attachmentType === MessageType.Video && attachmentPathBase64 ? (
+                        <div className="flex flex-col items-center gap-3 animate-scale-up w-full max-w-sm">
+                          <video src={attachmentPathBase64 || undefined} controls className="rounded-2xl max-h-64 w-full object-contain shadow-2xl border border-white/15" />
+                          <span className="text-xs text-white/80 font-black tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full border border-white/10">{attachmentFileName || "Attached Video"}</span>
+                        </div>
+                      ) : attachmentType === MessageType.Audio && attachmentPathBase64 ? (
+                        <div className="flex flex-col items-center gap-4 animate-scale-up w-full max-w-xs text-zinc-100">
+                          <AudioAttachmentPlayer mediaUrl={attachmentPathBase64} fileName={attachmentFileName} fileSize={attachmentFileSize} />
+                          <span className="text-xs text-white/80 font-black tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full border border-white/10">Audio Preview</span>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-4 animate-scale-up">
+                          <div className="w-24 h-24 bg-white/10 backdrop-blur-md rounded-3xl flex items-center justify-center border border-white/15 text-[#53bdeb] shadow-xl">
+                            <Paperclip size={40} />
+                          </div>
+                          <span className="text-sm text-white font-heavy bg-black/50 px-4 py-2 rounded-full border border-white/10 tracking-wider">{attachmentFileName || "Attached File"}</span>
+                          {attachmentFileSize > 0 && (
+                            <span className="text-[10px] text-zinc-300 font-mono font-bold tracking-wider bg-black/35 px-2.5 py-1 rounded-md">{(attachmentFileSize / 1024).toFixed(1)} KB</span>
+                          )}
+                        </div>
+                      )
                     )}
                   </div>
 
@@ -2286,7 +3950,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     />
                     <button 
                       onClick={handleSendAttachment}
-                      className="w-12 h-12 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full flex items-center justify-center shrink-0 shadow-lg transition-transform active:scale-95"
+                      style={{ backgroundColor: chatThemeColor }}
+                      className="w-12 h-12 text-white rounded-full flex items-center justify-center shrink-0 shadow-lg transition-transform active:scale-95 cursor-pointer"
                       title="Commit and Send"
                     >
                       <Send size={20} className="ml-0.5 text-white" />
@@ -2299,13 +3964,13 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             {/* Input Area */}
             <div className="bg-[#F0F0F0] dark:bg-[#121214] p-2 shrink-0 pb-safe flex flex-col relative z-10 shadow-md">
               {replyTo && (
-                <div className="bg-white dark:bg-[#1a1a1c] px-3 py-2 mb-2 rounded-md border-l-4 border-emerald-500 flex justify-between items-center mr-12 shadow-sm text-sm">
-                  <div className="truncate text-zinc-600">
-                    <span className="font-bold text-emerald-600 text-xs mr-2">Replying to:</span> 
+                <div className="bg-zinc-100 dark:bg-[#1a1a1c] px-3 py-1.5 mb-2 rounded-lg border-l-4 border-emerald-500 flex justify-between items-center mr-12 shadow-sm text-xs">
+                  <div className="truncate text-zinc-700 dark:text-zinc-300">
+                    <span className="font-bold text-emerald-600 block text-[10px] uppercase">Reply</span> 
                     {replyTo.text}
                   </div>
-                  <button onClick={() => setReplyTo(null)} className="text-zinc-400 hover:text-black">
-                    <X size={16} />
+                  <button onClick={() => setReplyTo(null)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-white p-1">
+                    <X size={14} />
                   </button>
                 </div>
               )}
@@ -2315,45 +3980,107 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   ref={fileInputRef} 
                   className="hidden" 
                   onChange={handleAttachmentUpload}
+                  multiple
+                />
+                <input 
+                  type="file" 
+                  ref={mediaInputRef} 
+                  className="hidden" 
+                  accept="image/*,video/*"
+                  onChange={handleAttachmentUpload}
+                  multiple
                 />
                 
-                <div className="flex-1 bg-[#F0F0F0] dark:bg-[#1c1c1e] border border-transparent shadow-none overflow-hidden flex items-end relative rounded-xl">
+                <div className="flex-1 bg-[#F0F0F0] dark:bg-[#1c1c1e] border border-transparent shadow-none overflow-hidden flex items-center relative rounded-xl min-h-[48px]">
                 {!isRecording && (
                   <button onClick={() => fileInputRef.current?.click()} className="p-3 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200" title="Auto-fill File Payload">
                     <Paperclip size={20} />
                   </button>
                 )}
+                {!isRecording && (
+                  <button onClick={() => mediaInputRef.current?.click()} className="p-3 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200" title="Select Image or Video">
+                    <Image size={20} />
+                  </button>
+                )}
                 
                 {isRecording ? (
-                  <div className="flex-1 flex items-center gap-3 px-4 py-3 bg-red-50 dark:bg-red-950/20 text-red-500 rounded-md">
-                    <motion.div 
-                      key="recording-waves"
-                      className="flex gap-0.5 items-end h-4"
-                      initial="hidden"
-                      animate="visible"
-                    >
-                      {[...Array(5)].map((_, i) => (
-                        <motion.div
-                          key={i}
-                          className="w-1 bg-red-500 rounded-full"
-                          variants={{
-                            hidden: { height: 4 },
-                            visible: { 
-                                height: [4, 16, 4],
-                                transition: { repeat: Infinity, duration: 0.8, delay: i * 0.1 } 
-                            }
-                          }}
-                        />
-                      ))}
-                    </motion.div>
-                    <span className="text-xs font-bold font-mono tabular-nums">0:{recordingDuration.toString().padStart(2, '0')}</span>
+                  <div className="flex-1 flex items-center justify-between gap-3 px-4 py-2 bg-red-50 dark:bg-red-950/20 rounded-md">
+                    <div className="flex items-center gap-3">
+                      <button 
+                        onClick={deleteRecordingAudio} 
+                        className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-full transition-colors cursor-pointer"
+                        title="Delete Recording"
+                      >
+                        <Trash2 size={18} />
+                      </button>
+
+                      {recordingState === 'recording' ? (
+                        <div className="flex items-center gap-2">
+                          <AudioRecordingVisualizer stream={recordingStream} isRecording={isRecording} />
+                          <span className="text-xs font-bold font-mono text-red-500 tabular-nums">
+                            {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                          </span>
+                          <motion.div 
+                            className="flex items-center gap-1 text-zinc-400 dark:text-zinc-500 text-[10px] ml-2 select-none pointer-events-none"
+                            animate={{ x: [0, -4, 0] }}
+                            transition={{ repeat: Infinity, duration: 1.5 }}
+                          >
+                            <ChevronLeft size={12} className="animate-pulse text-red-500/80" />
+                            <span className="font-semibold hidden sm:inline">Slide button left to cancel</span>
+                          </motion.div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold font-mono text-zinc-500 dark:text-zinc-400 tabular-nums">
+                            {Math.floor(recordingDuration / 60)}:{(recordingDuration % 60).toString().padStart(2, '0')}
+                          </span>
+                          {recordedBlobs.length > 0 && (
+                            <div className="flex items-center gap-1.5 bg-zinc-200/60 dark:bg-zinc-800 px-2 py-1 rounded-full">
+                              <button 
+                                onClick={handleTogglePreviewPlay} 
+                                className="w-6 h-6 rounded-full bg-white dark:bg-zinc-700 hover:bg-zinc-100 flex items-center justify-center text-zinc-700 dark:text-zinc-200 shadow-sm cursor-pointer"
+                                title="Play Preview"
+                              >
+                                {isPreviewPlaying ? <Pause size={10} fill="currentColor" /> : <Play size={10} className="ml-0.5" fill="currentColor" />}
+                              </button>
+                              {isPreviewPlaying && (
+                                <span className="text-[9px] font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                  {Math.floor(previewCurrentTime / 60)}:{(Math.floor(previewCurrentTime) % 60).toString().padStart(2, '0')}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center">
+                      {recordingState === 'recording' ? (
+                        <button 
+                          onClick={pauseRecordingAudio} 
+                          className="p-1.5 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors cursor-pointer"
+                          title="Pause Recording"
+                        >
+                          <Pause size={18} />
+                        </button>
+                      ) : (
+                        <button 
+                          onClick={startRecordingAudio} 
+                          className="p-1.5 text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-full transition-all animate-pulse cursor-pointer"
+                          title="Resume Recording"
+                        >
+                          <Mic size={18} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   <textarea 
+                    ref={messageInputRef}
                     value={messageText}
                     onChange={(e) => {
                       setMessageText(e.target.value);
-                      handleUserTyping();
+                      handleLocalUserTyping();
                     }}
                     placeholder="Type message..."
                     className="flex-1 bg-transparent resize-none max-h-24 min-h-[40px] px-3 py-3 text-xs text-zinc-800 dark:text-zinc-200 focus:outline-none placeholder-zinc-400 font-semibold"
@@ -2371,12 +4098,22 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
               {messageText.trim().length > 0 ? (
                 <button 
                   onClick={handleSendMessage}
-                  className={`w-10 h-10 flex items-center justify-center shrink-0 transition-colors rounded-full shadow-sm bg-[#00A884] dark:bg-[#064e3b] text-white hover:bg-[#008f6f] dark:hover:bg-[#054334]`}
+                  style={{ backgroundColor: chatThemeColor }}
+                  className="w-10 h-10 flex items-center justify-center shrink-0 transition-opacity rounded-full shadow-sm text-white hover:opacity-90 active:scale-95 cursor-pointer"
+                  title="Send Message"
                 >
                   <Send size={18} className="ml-0.5" />
                 </button>
               ) : (
-                <button 
+                <motion.div 
+                  drag={isRecording && recordingState === 'recording' ? "x" : false}
+                  dragConstraints={{ left: -140, right: 0 }}
+                  dragElastic={0.05}
+                  onDragEnd={(event, info) => {
+                    if (info.offset.x < -100) {
+                      deleteRecordingAudio();
+                    }
+                  }}
                   onClick={() => {
                     if (isRecording) {
                       stopRecordingAudio();
@@ -2384,12 +4121,14 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       startRecordingAudio();
                     }
                   }}
-                  className={`w-10 h-10 flex items-center justify-center shrink-0 transition-colors rounded-full shadow-sm ${
-                    isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-[#00A884] dark:bg-[#064e3b] text-white hover:bg-[#008f6f] dark:hover:bg-[#054334]'
+                  style={isRecording ? undefined : { backgroundColor: chatThemeColor }}
+                  className={`w-10 h-10 flex items-center justify-center shrink-0 transition-all rounded-full shadow-sm cursor-pointer select-none touch-none ${
+                    isRecording ? 'bg-red-500 text-white animate-pulse' : 'text-white hover:opacity-90 active:scale-95'
                   }`}
+                  title={isRecording ? "Send / Slide left to cancel" : "Record Voice Note"}
                 >
-                  {isRecording ? <Square size={16} fill="currentColor" /> : <Mic size={18} />}
-                </button>
+                  {isRecording ? <Send size={18} className="ml-0.5" /> : <Mic size={18} />}
+                </motion.div>
               )}
               </div>
             </div>
@@ -2414,14 +4153,23 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       <h2 className="text-xl font-black text-zinc-900 tracking-tight flex items-center gap-2">
                         <Users size={20} className="text-indigo-600" /> Chat Information
                       </h2>
-                      <button 
-                        onClick={() => setShowChatInfo(false)} 
-                        className="flex items-center gap-1.5 text-white bg-zinc-950 hover:bg-zinc-800 py-1.5 px-3 rounded-lg transition-all border border-zinc-950 shadow-sm"
-                        title="Back to Chat"
-                      >
-                        <span className="text-xs font-bold uppercase">Back</span>
-                        <ChevronLeft size={16} className="rotate-180" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={exportChatHistory} 
+                          className="flex items-center gap-1.5 text-zinc-600 hover:text-zinc-900 bg-zinc-100 hover:bg-zinc-200 py-1.5 px-2 rounded-lg transition-all shadow-sm"
+                          title="Export Chat History"
+                        >
+                          <Download size={16} />
+                        </button>
+                        <button 
+                          onClick={() => setShowChatInfo(false)} 
+                          className="flex items-center gap-1.5 text-white bg-zinc-950 hover:bg-zinc-800 py-1.5 px-3 rounded-lg transition-all border border-zinc-950 shadow-sm"
+                          title="Back to Chat"
+                        >
+                          <span className="text-xs font-bold uppercase">Back</span>
+                          <ChevronLeft size={16} className="rotate-180" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Metadata summary with editable state */}
@@ -2437,7 +4185,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                             className="w-20 h-20 bg-zinc-50 border-2 border-dashed border-zinc-300 rounded-full flex items-center justify-center cursor-pointer hover:bg-zinc-100 transition-colors relative overflow-hidden group shadow-inner"
                           >
                             {editGroupImagePreview ? (
-                              <img src={editGroupImagePreview} alt="Group Preview" className="w-full h-full object-cover animate-fade-in" />
+                              <img src={editGroupImagePreview || undefined} alt="Group Preview" className="w-full h-full object-cover animate-fade-in" />
                             ) : (
                               <div className="flex flex-col items-center justify-center text-zinc-400">
                                 <Plus size={20} className="text-zinc-400 group-hover:text-black transition-colors" />
@@ -2532,7 +4280,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                 });
                                 const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
                                 const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
-                                const partnerImg = personDetails?.imageUrl || personDetails?.ImageUrl;
+                                const partnerImg = activeChat.imageUrl || activeChat.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
                                 const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
                                 return partnerImg ? (
                                   <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
@@ -2681,7 +4429,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                     <div className="flex items-center gap-2">
                                       <div className="w-8 h-8 rounded-full bg-zinc-100 border border-zinc-200 flex items-center justify-center text-zinc-700 font-bold text-xs overflow-hidden">
                                         {pImg ? (
-                                          <img src={pImg.startsWith('data:') ? pImg : `data:image/jpeg;base64,${pImg}`} alt={fName} className="w-full h-full object-cover" />
+                                          <img src={getImageUrl(pImg)} alt={fName} className="w-full h-full object-cover" />
                                         ) : (
                                           fName.charAt(0)
                                         )}
@@ -2757,7 +4505,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     className="w-24 h-24 bg-zinc-100 border-2 border-dashed border-zinc-300 rounded-full flex items-center justify-center cursor-pointer hover:bg-zinc-200 transition-colors relative overflow-hidden"
                   >
                      {groupImagePreview ? (
-                       <img src={groupImagePreview} alt="Group Preview" className="w-full h-full object-cover" />
+                       <img src={groupImagePreview || undefined} alt="Group Preview" className="w-full h-full object-cover" />
                      ) : (
                        <div className="flex flex-col items-center justify-center text-zinc-400">
                          <CirclePlus size={24} />
@@ -2819,7 +4567,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                           <div className="flex items-center gap-2.5 min-w-0">
                             <div className="w-7 h-7 rounded-full border border-zinc-200 overflow-hidden relative shrink-0 flex items-center justify-center bg-zinc-100 text-[9px] font-bold text-zinc-500 uppercase">
                               {pImg ? (
-                                <img src={pImg.startsWith('data:') ? pImg : `data:image/jpeg;base64,${pImg}`} alt={pName} className="w-full h-full object-cover" />
+                                <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
                               ) : (
                                 pName.split(' ').map((n: string) => n[0]).join('').slice(0, 2)
                               )}
@@ -3009,10 +4757,19 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                         isSelected ? 'border-black bg-black text-white' : 'border-zinc-100 hover:border-zinc-300 bg-white text-zinc-800'
                       }`}
                     >
-                      <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black ${
+                      <div className={`w-10 h-10 rounded-full overflow-hidden flex items-center justify-center font-black ${
                         isSelected ? 'bg-white/20' : 'bg-zinc-100 text-zinc-600'
                       }`}>
-                        {pName.charAt(0).toUpperCase()}
+                        {person.imageUrl || person.ImageUrl || person.profileImageUrl || person.ProfileImageUrl ? (
+                          <img 
+                            src={getImageUrl(person.imageUrl || person.ImageUrl || person.profileImageUrl || person.ProfileImageUrl)} 
+                            alt={pName} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          pName.charAt(0).toUpperCase()
+                        )}
                       </div>
                       <span className="font-bold text-sm tracking-tight flex-1">{pName}</span>
                       {isSelected && isCreatingDirect ? (
@@ -3097,7 +4854,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setOverlayMessageId(null)}
-            className="fixed inset-0 bg-zinc-950/45 backdrop-blur-md z-[150] select-none cursor-default"
+            className="fixed inset-0 bg-zinc-955/45 backdrop-blur-md z-[150] select-none cursor-default"
           >
             {/* Highlighted Message Display in exactly same screen position */}
             {pressedMessageRect && (
@@ -3109,12 +4866,13 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   width: pressedMessageRect.width,
                   minHeight: pressedMessageRect.height,
                   margin: 0,
-                  pointerEvents: 'none'
+                  pointerEvents: 'none',
+                  ...(overlayMsg.isMe ? { backgroundColor: chatThemeColor, borderColor: chatThemeColor, color: 'white' } : {})
                 }}
                 className={`p-2.5 rounded-md shadow-lg border ${
                   overlayMsg.isMe 
-                    ? 'bg-[#DCF8C6] border-[#DCF8C6] dark:bg-emerald-950 dark:border-emerald-900 dark:text-emerald-100' 
-                    : 'bg-white border-zinc-200 dark:bg-[#1c1c1e] dark:border-zinc-800 dark:text-zinc-200 shadow-md'
+                    ? 'text-white' 
+                    : 'bg-white border-zinc-200 dark:bg-[#1c1c1e] dark:border-[#1c1c1e] dark:text-zinc-200 shadow-md'
                 } ${overlayMsg.isMe ? 'rounded-tr-none' : 'rounded-tl-none'} scale-100 z-[160] overflow-visible`}
               >
                 {!overlayMsg.isMe && (
@@ -3122,35 +4880,32 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 )}
 
                 {overlayMsg.replyTo && (
-                  <div className="mb-2 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-emerald-500 rounded text-xs text-zinc-650 dark:text-zinc-300 truncate max-w-full">
+                  <div className="mb-2 p-2 bg-black/5 dark:bg-white/5 border-l-4 border-emerald-500 rounded text-xs text-zinc-655 dark:text-zinc-300 truncate max-w-full">
                     {overlayMsg.replyTo.text}
                   </div>
                 )}
 
-                {overlayMsg.type === 'text' && (
-                  <p className="text-xs text-zinc-800 dark:text-zinc-200 break-words font-medium whitespace-pre-wrap">{overlayMsg.text}</p>
+                {overlayMsg.text && (
+                  <p className={`text-xs break-words font-medium whitespace-pre-wrap ${overlayMsg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{overlayMsg.text}</p>
                 )}
                 
-                {overlayMsg.type === 'image' && (overlayMsg.mediaUrl || overlayMsg.attachments?.length > 0) && (
-                  <div className="flex flex-col gap-1">
-                    <img src={overlayMsg.mediaUrl || (overlayMsg.attachments && overlayMsg.attachments[0]?.fileUrl) || (overlayMsg.attachments && overlayMsg.attachments[0]?.filePath)} alt="attachment" className="rounded-sm max-h-48 object-cover max-w-full" referrerPolicy="no-referrer" />
-                    {overlayMsg.text && <p className="text-xs text-zinc-800 dark:text-zinc-200 pt-1">{overlayMsg.text}</p>}
-                  </div>
-                )}
+                {renderMsgAttachments(overlayMsg)}
                 
-                {overlayMsg.type === 'audio' && (
+                {overlayMsg.type === 'audio' && !overlayMsg.attachments?.length && (
                   <VoicePlayer mediaUrl={overlayMsg.mediaUrl} duration={overlayMsg.duration} />
                 )}
 
-                <div className={`flex justify-between items-center gap-4 mt-1.5 w-full ${overlayMsg.isMe ? 'text-emerald-700/80 dark:text-emerald-400/80' : 'text-zinc-500'}`}>
+                <div className={`flex justify-between items-center gap-4 mt-1.5 w-full ${overlayMsg.isMe ? 'text-white/80' : 'text-zinc-500'}`}>
                   <div className="flex items-center gap-1 ml-auto shrink-0 whitespace-nowrap">
                     <p className="text-[9px] font-semibold uppercase shrink-0 whitespace-nowrap">{overlayMsg.time}</p>
-                    <CheckCheck size={12} className={overlayMsg.isMe ? "text-[#53bdeb] shrink-0" : "text-zinc-400 shrink-0"} />
+                    {overlayMsg.isMe && (
+                      <CheckCheck size={12} className={`${getMessageTickColor(overlayMsg)} shrink-0`} />
+                    )}
                   </div>
                 </div>
                 
                 {/* Small tail */}
-                <div className={`absolute top-0 w-2.5 h-2.5 ${overlayMsg.isMe ? '-right-2.5 bg-[#DCF8C6] dark:bg-emerald-950' : '-left-2.5 bg-white dark:bg-[#1c1c1e]'}`} style={{ clipPath: overlayMsg.isMe ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 0 0, 100% 100%)' }}></div>
+                <div className={`absolute top-0 w-2.5 h-2.5 ${overlayMsg.isMe ? '-right-2.5' : '-left-2.5 bg-white dark:bg-[#1c1c1e]'}`} style={{ clipPath: overlayMsg.isMe ? 'polygon(0 0, 100% 0, 0 100%)' : 'polygon(100% 0, 0 0, 100% 100%)', backgroundColor: overlayMsg.isMe ? chatThemeColor : undefined }}></div>
               </div>
             )}
 
@@ -3180,6 +4935,9 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 onClick={() => {
                   setReplyTo({ id: overlayMsg.id, text: overlayMsg.text || (overlayMsg.type === 'image' ? 'Image File' : 'Voice Message') });
                   setOverlayMessageId(null);
+                  setTimeout(() => {
+                    messageInputRef.current?.focus();
+                  }, 100);
                 }}
                 className="w-full px-4 py-3 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-850/80 transition-colors cursor-pointer text-xs font-bold text-zinc-800 dark:text-zinc-200 flex justify-between items-center text-left"
               >
@@ -3342,6 +5100,57 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           </motion.div>
         )}
       </AnimatePresence>
+
+      {overlayMessage && (
+        <div className="fixed inset-0 z-[100] bg-black flex flex-col items-center justify-center">
+          {/* Header */}
+          <div className="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-[102] bg-gradient-to-b from-black/60 to-transparent">
+             <div className="text-white text-sm font-semibold drop-shadow-md">
+               {previewItems.length > 1 ? `${previewIndex + 1} of ${previewItems.length}` : ''}
+             </div>
+             <button onClick={() => setOverlayMessage(null)} className="text-white p-2">
+                <X size={32} />
+             </button>
+          </div>
+          
+          {/* Previous Button */}
+          {previewItems.length > 1 && previewIndex > 0 && (
+             <button 
+                onClick={() => {
+                   const prevIdx = previewIndex - 1;
+                   setPreviewIndex(prevIdx);
+                   setOverlayMessage(previewItems[prevIdx]);
+                }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 text-white p-3 z-[101] bg-black/40 hover:bg-black/60 rounded-full"
+             >
+                <ChevronLeft size={32} />
+             </button>
+          )}
+
+          {/* Next Button */}
+          {previewItems.length > 1 && previewIndex < previewItems.length - 1 && (
+             <button 
+                onClick={() => {
+                   const nextIdx = previewIndex + 1;
+                   setPreviewIndex(nextIdx);
+                   setOverlayMessage(previewItems[nextIdx]);
+                }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 text-white p-3 z-[101] bg-black/40 hover:bg-black/60 rounded-full"
+             >
+                <ChevronLeft size={32} className="rotate-180" />
+             </button>
+          )}
+
+          {/* Content */}
+          <div className="w-full h-full flex items-center justify-center p-4">
+            {overlayMessage.type === 'image' && overlayMessage.mediaUrl ? (
+              <img src={overlayMessage.mediaUrl || undefined} className="max-w-full max-h-full object-contain" />
+            ) : overlayMessage.type === 'video' && overlayMessage.mediaUrl ? (
+              <video src={overlayMessage.mediaUrl || undefined} controls autoPlay className="max-w-full max-h-full object-contain outline-none" />
+            ) : null}
+          </div>
+        </div>
+      )}
 
     </div>
   );

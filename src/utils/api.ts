@@ -39,6 +39,14 @@ export const getAppNamesIdList = async () => {
 
 export const saveAppNamesList = (data: any) => {
   if (data && typeof data === 'object') {
+    if ('data' in data && data.data) {
+      localStorage.setItem('app_names_list', JSON.stringify(data.data));
+      return;
+    }
+    if ('Data' in data && data.Data) {
+      localStorage.setItem('app_names_list', JSON.stringify(data.Data));
+      return;
+    }
     if ('result' in data && data.result) {
       localStorage.setItem('app_names_list', JSON.stringify(data.result));
       return;
@@ -57,6 +65,12 @@ export const getStoredAppNamesList = () => {
   try {
     const parsed = JSON.parse(data);
     if (parsed && typeof parsed === 'object') {
+      if ('data' in parsed && parsed.data) {
+        return parsed.data;
+      }
+      if ('Data' in parsed && parsed.Data) {
+        return parsed.Data;
+      }
       if ('result' in parsed && parsed.result) {
         return parsed.result;
       }
@@ -70,7 +84,7 @@ export const getStoredAppNamesList = () => {
   }
 };
 
-const api = axios.create({
+export const api = axios.create({
   get baseURL() {
     return getBaseUrl() + '/Home_Security';
   }
@@ -254,27 +268,30 @@ export const sendMessage = async (data: { chatId: number; content?: string; type
   if (data.attachments && data.attachments.length > 0) {
     for (let i = 0; i < data.attachments.length; i++) {
       const att = data.attachments[i];
-      let filePathStr = att.filePath || '';
-      if (filePathStr instanceof Blob) {
-        try {
-          filePathStr = await blobToBase64(filePathStr);
-        } catch (e) {
-          console.error("Failed to convert Blob to Base64:", e);
-          filePathStr = '';
-        }
+      let fileBlob: Blob;
+      if (att.filePath && typeof att.filePath === 'string' && att.filePath.startsWith('data:')) {
+        fileBlob = base64ToBlob(att.filePath, att.contentType);
+      } else if (att.filePath instanceof Blob || att.filePath instanceof File) {
+        fileBlob = att.filePath;
+      } else {
+        fileBlob = new Blob([''], { type: att.contentType || 'application/octet-stream' });
       }
+
+      // Append with indices as requested: attachments[i].Field
+      formData.append(`attachments[${i}].FileName`, att.fileName || 'file');
+      formData.append(`attachments[${i}].FilePath`, fileBlob, att.fileName || 'file');
+      formData.append(`attachments[${i}].Type`, (att.type || att.messageType || 0).toString());
+      formData.append(`attachments[${i}].MessageType`, (att.type || att.messageType || 0).toString());
+      formData.append(`attachments[${i}].FileSize`, (att.fileSize || 0).toString());
+      formData.append(`attachments[${i}].ThumbnailPath`, att.thumbnailPath || '');
       
-      const attObj = {
-        fileName: att.fileName || '',
-        filePath: filePathStr || '',
-        contentType: att.contentType || '',
-        fileSize: att.fileSize || 0,
-        thumbnailPath: att.thumbnailPath || ''
-      };
-      
-      const jsonStr = JSON.stringify(attObj);
-      formData.append('Attachments', jsonStr);
-      formData.append('sendMessageDto.Attachments', jsonStr);
+      // Also append to sendMessageDto.Attachments
+      formData.append(`sendMessageDto.Attachments[${i}].FileName`, att.fileName || 'file');
+      formData.append(`sendMessageDto.Attachments[${i}].FilePath`, fileBlob, att.fileName || 'file');
+      formData.append(`sendMessageDto.Attachments[${i}].Type`, (att.type || att.messageType || 0).toString());
+      formData.append(`sendMessageDto.Attachments[${i}].MessageType`, (att.type || att.messageType || 0).toString());
+      formData.append(`sendMessageDto.Attachments[${i}].FileSize`, (att.fileSize || 0).toString());
+      formData.append(`sendMessageDto.Attachments[${i}].ThumbnailPath`, att.thumbnailPath || '');
     }
   }
 
@@ -330,8 +347,8 @@ export const deleteChat = async (chatId: number) => {
   return response.data;
 };
 
-export const sendTypingStatus = async (chatId: number) => {
-  const response = await api.post(`/Message/Typing?chatId=${chatId}`);
+export const sendTypingStatus = async (chatId: number, action: string = 'typing') => {
+  const response = await api.post(`/Message/Typing?chatId=${chatId}&action=${encodeURIComponent(action)}`);
   return response.data;
 };
 
@@ -341,7 +358,7 @@ export const joinChatRoom = async (chatId: number) => {
 };
 
 export const getImageUrl = (img?: string) => {
-  if (!img) return '';
+  if (!img) return undefined;
   if (img.startsWith('data:') || img.startsWith('http://') || img.startsWith('https://')) return img;
   
   // Check if it's base64 encoded string but doesn't have the data prefix
@@ -349,7 +366,8 @@ export const getImageUrl = (img?: string) => {
     return `data:image/jpeg;base64,${img}`;
   }
   
-  const cleanPath = img.startsWith('/') ? img.slice(1) : img;
+  const normalized = img.replace(/\\/g, '/');
+  const cleanPath = normalized.startsWith('/') ? normalized.slice(1) : normalized;
   return `${getBaseUrl()}/storage/${cleanPath}`;
 };
 

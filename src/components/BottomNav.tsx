@@ -1,4 +1,5 @@
 import { LayoutDashboard, Video, DoorClosed, MessageCircle, FileText } from 'lucide-react';
+import { getUserDetails } from '../utils/api';
 
 export type ViewType = 'dashboard' | 'cameras' | 'doors' | 'chats' | 'logs' | 'settings';
 
@@ -27,6 +28,10 @@ function NavItem({ icon: Icon, label, active, onClick, activeColorClass }: NavIt
 }
 
 export function BottomNav({ currentView, setView }: { currentView: ViewType, setView: (v: ViewType) => void }) {
+  const userDetails = getUserDetails();
+  const userRole = String(userDetails?.RoleName || userDetails?.roleName || userDetails?.role || userDetails?.Role || '');
+  const canViewLogs = userRole.toLowerCase() === 'owner' || userRole.toLowerCase() === 'wife';
+
   return (
     <nav className="h-[72px] border-t border-black bg-white flex items-center justify-around px-2 pb-safe z-40 relative shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
       <NavItem 
@@ -57,13 +62,15 @@ export function BottomNav({ currentView, setView }: { currentView: ViewType, set
         active={currentView === 'chats'} 
         onClick={() => setView('chats')} 
       />
-      <NavItem 
-        icon={FileText} 
-        label="Logs" 
-        activeColorClass="text-rose-600"
-        active={currentView === 'logs'} 
-        onClick={() => setView('logs')} 
-      />
+      {canViewLogs && (
+        <NavItem 
+          icon={FileText} 
+          label="Logs" 
+          activeColorClass="text-rose-600"
+          active={currentView === 'logs'} 
+          onClick={() => setView('logs')} 
+        />
+      )}
     </nav>
   );
 }

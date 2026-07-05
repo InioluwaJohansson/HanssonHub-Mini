@@ -64,24 +64,44 @@ export default function Logs() {
 
       <div className="px-5 py-3 shrink-0 flex flex-col gap-3">
         <div className="grid grid-cols-2 gap-3">
-          <div className="relative">
-            <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="relative flex items-center bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all overflow-hidden">
+            <Calendar size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
             <input 
               type="date" 
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
+              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-slate-700 dark:text-zinc-200" 
               placeholder="Start Date"
+              style={{
+                colorScheme: 'light dark'
+              }}
             />
+            <style>{`
+              input[type="date"]::-webkit-calendar-picker-indicator {
+                background: transparent;
+                bottom: 0;
+                color: transparent;
+                cursor: pointer;
+                height: auto;
+                left: 0;
+                position: absolute;
+                right: 0;
+                top: 0;
+                width: auto;
+              }
+            `}</style>
           </div>
-          <div className="relative">
-            <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <div className="relative flex items-center bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-500 transition-all overflow-hidden">
+            <Calendar size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
             <input 
               type="date" 
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" 
+              className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-slate-700 dark:text-zinc-200" 
               placeholder="End Date"
+              style={{
+                colorScheme: 'light dark'
+              }}
             />
           </div>
         </div>

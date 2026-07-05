@@ -1,8 +1,8 @@
 export enum MessageType {
   Text = 0,
   Image = 1,
-  Audio = 2,
-  Video = 3,
+  Video = 2,
+  Audio = 3,
   File = 4
 }
 
@@ -38,6 +38,7 @@ export interface MessageAttachmentDto {
   contentType: string;
   fileSize: number;
   thumbnailPath?: string;
+  type?: MessageType;
 }
 
 export interface SendMessageDto {

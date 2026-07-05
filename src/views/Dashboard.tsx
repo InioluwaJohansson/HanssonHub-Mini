@@ -18,13 +18,18 @@ export default function Dashboard() {
 
   return (
     <div className="p-5 flex flex-col gap-3">
-      <div className="flex flex-col gap-1 mb-2">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }} className="flex flex-col gap-1 mb-2">
         <h3 className="text-3xl font-black text-zinc-800 flex items-center gap-2"><LayoutDashboard size={28} /> Dashboard</h3>
         <p className="text-xs text-zinc-500 font-medium tracking-wide">System overview and recent activity</p>
-      </div>
+      </motion.div>
       
       <div className="grid grid-cols-1 gap-3">
-        <div className="border border-indigo-100 p-4 bg-indigo-50/50 flex items-center justify-between rounded-xl shadow-sm">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }} 
+          animate={{ opacity: 1, scale: 1 }} 
+          transition={{ duration: 0.4, delay: 0.1 }}
+          className="border border-indigo-100 p-4 bg-indigo-50/50 flex items-center justify-between rounded-xl shadow-sm"
+        >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white shadow-sm border border-indigo-100 flex items-center justify-center text-indigo-600 rounded-xl">
               <Camera size={24} />
@@ -34,9 +39,14 @@ export default function Dashboard() {
               <p className="text-xs text-indigo-600 font-medium tracking-tight mt-0.5">4 Online</p>
             </div>
           </div>
-        </div>
-
-        <div className="border border-emerald-100 p-4 bg-emerald-50/50 flex items-center justify-between rounded-xl shadow-sm">
+        </motion.div>
+        
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }} 
+          animate={{ opacity: 1, scale: 1 }} 
+          transition={{ duration: 0.4, delay: 0.2 }}
+          className="border border-emerald-100 p-4 bg-emerald-50/50 flex items-center justify-between rounded-xl shadow-sm"
+        >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white shadow-sm border border-emerald-100 flex items-center justify-center text-emerald-600 rounded-xl">
               <ShieldCheck size={24} />
@@ -46,10 +56,10 @@ export default function Dashboard() {
               <p className="text-xs text-emerald-600 font-medium tracking-tight mt-0.5">All Secure</p>
             </div>
           </div>
-        </div>
+        </motion.div>
       </div>
 
-      <div className="mt-4 text-left">
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.3 }} className="mt-4 text-left">
         <h3 className="text-xs font-bold text-indigo-900 uppercase tracking-widest mb-3 flex items-center gap-2">
            <FileText size={14} /> Recent Logs
         </h3>
@@ -97,7 +107,7 @@ export default function Dashboard() {
           ))}
         </div>
         )}
-      </div>
+      </motion.div>
     </div>
   );
 }

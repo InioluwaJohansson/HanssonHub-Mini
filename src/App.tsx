@@ -13,6 +13,7 @@ import Settings from './views/Settings';
 import { startHomeSecurityHub, homeSecurityHubConnection, rebuildHubConnections } from './utils/signalr';
 import { LoaderCircle } from 'lucide-react';
 import { refreshLoginToken, saveAppNamesList, getStoredAppNamesList } from './utils/api';
+import { playNotificationSound } from './utils/audio';
 import { clearAllStores, clearStore, STORES } from './utils/db';
 
 import Logs from './views/Logs';
@@ -233,7 +234,18 @@ export default function App() {
       // Trigger notification if not sent by user
       if (!isMe) {
         const msgChatId = (msg.chatId || msg.ChatId)?.toString();
+        const activeChatId = localStorage.getItem('activeChatId');
+        
+        if (msgChatId === activeChatId) {
+            playNotificationSound('messageReceived');
+        }
+        
         triggerNotification(senderName, text, finalPhoto, msgChatId);
+
+        // Presence: Set user to online
+        if (msgSenderId) {
+            homeSecurityHubConnection.invoke("UserOnline", Number(msgSenderId)).catch(console.error);
+        }
       }
     };
 
@@ -259,12 +271,46 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const theme = localStorage.getItem('app_theme');
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-    }
+    const applyTheme = () => {
+      const sync = localStorage.getItem('app_theme_sync') === 'true';
+      if (sync) {
+        const isOsDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        localStorage.setItem('app_theme', isOsDark ? 'dark' : 'light');
+        if (isOsDark) {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      } else {
+        const theme = localStorage.getItem('app_theme');
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      }
+    };
+
+    applyTheme();
+
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleChange = () => {
+      if (localStorage.getItem('app_theme_sync') === 'true') {
+        applyTheme();
+      }
+    };
+    
+    const handleSyncChanged = () => {
+      applyTheme();
+    };
+
+    mediaQuery.addEventListener('change', handleChange);
+    window.addEventListener('theme_sync_changed', handleSyncChanged);
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+      window.removeEventListener('theme_sync_changed', handleSyncChanged);
+    };
   }, []);
 
   useEffect(() => {
@@ -518,7 +564,9 @@ export default function App() {
                 onTouchStart={handleTouchStart}
                 onTouchMove={handleTouchMove}
                 onTouchEnd={handleTouchEnd}
-                className="flex-1 overflow-x-hidden overflow-y-auto relative w-full touch-pan-y ios-bounce"
+                className={`flex-1 overflow-x-hidden relative w-full touch-pan-y ios-bounce ${
+                  ['chats', 'logs', 'settings'].includes(currentView) ? 'overflow-y-hidden' : 'overflow-y-auto'
+                }`}
               >
                 {/* 3-dot bouncing indicator shown when pulling down */}
                 <div 

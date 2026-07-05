@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { User, LogOut, Shield, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ViewType } from './BottomNav';
-import { getUserDetails, getImageUrl } from '../utils/api';
+import { getUserDetails, getImageUrl, getStoredAppNamesList } from '../utils/api';
 
 export function Header({ onLogout, setView }: { onLogout: () => void, setView: (v: ViewType) => void }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -10,7 +10,36 @@ export function Header({ onLogout, setView }: { onLogout: () => void, setView: (
 
   const user = getUserDetails();
   const name = user?.fullName || user?.FullName || user?.userName || user?.UserName || 'User';
-  const image = user?.profileImageUrl || user?.ProfileImageUrl || user?.imageUrl || user?.ImageUrl;
+  const userId = user?.id || user?.Id;
+
+  let image = user?.profileImageUrl || user?.ProfileImageUrl || user?.imageUrl || user?.ImageUrl;
+  if (!image && userId) {
+    const appNames = getStoredAppNamesList();
+    if (appNames) {
+      const possibleArrays = [
+        appNames,
+        appNames.personIdNames,
+        appNames.PersonIdNames,
+        appNames.personNamesId,
+        appNames.PersonNamesId,
+        appNames.result?.personIdNames,
+        appNames.result?.PersonIdNames,
+        appNames.result?.personNamesId,
+        appNames.result?.PersonNamesId,
+        appNames.Result?.personIdNames,
+        appNames.Result?.PersonIdNames,
+        appNames.Result?.personNamesId,
+        appNames.Result?.PersonNamesId,
+      ];
+      const list = possibleArrays.find(arr => Array.isArray(arr));
+      if (Array.isArray(list)) {
+        const matchingPerson = list.find(ap => Number(ap.id || ap.Id) === Number(userId));
+        if (matchingPerson) {
+          image = matchingPerson.imageUrl || matchingPerson.ImageUrl;
+        }
+      }
+    }
+  }
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

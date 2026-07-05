@@ -100,7 +100,8 @@ export const startHomeSecurityHub = async () => {
       const token = getToken();
       if (token) {
         await activeHomeConnection.invoke("AddPersonRole", token);
-        console.log('[SignalR] AddPersonRole invoked on connect.');
+        await activeHomeConnection.invoke("AddPerson", token);
+        console.log('[SignalR] AddPersonRole and AddPerson invoked on connect.');
       }
     } catch (err) {
       console.log('Error connecting to HomeSecurityHub: ', err);
