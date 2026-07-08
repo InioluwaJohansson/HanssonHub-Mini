@@ -7,12 +7,13 @@ import { Header } from './components/Header';
 import { BottomNav, ViewType } from './components/BottomNav';
 import Dashboard from './views/Dashboard';
 import Doors from './views/Doors';
+import Actions from './views/Actions';
 import Cameras from './views/Cameras';
 import Chats from './views/Chats';
 import Settings from './views/Settings';
 import { startHomeSecurityHub, homeSecurityHubConnection, rebuildHubConnections } from './utils/signalr';
 import { LoaderCircle } from 'lucide-react';
-import { refreshLoginToken, saveAppNamesList, getStoredAppNamesList } from './utils/api';
+import { refreshLoginToken, saveAppNamesList, getStoredAppNamesList, saveToken } from './utils/api';
 import { playNotificationSound } from './utils/audio';
 import { clearAllStores, clearStore, STORES } from './utils/db';
 
@@ -24,6 +25,8 @@ export default function App() {
   const [appState, setAppState] = useState<AppState>(() => {
     const token = localStorage.getItem('auth_token');
     if (!token) return 'splash';
+    const isVerified = localStorage.getItem('auth_verified') === 'true';
+    if (!isVerified) return 'auth';
     const saved = localStorage.getItem('app_state');
     return (saved as AppState) || 'splash';
   });
@@ -136,8 +139,14 @@ export default function App() {
       const token = localStorage.getItem('auth_token');
       if (token) {
         try {
-          await refreshLoginToken();
-          console.log("Token refreshed successfully.");
+          const res = await refreshLoginToken();
+          if (res) {
+            const newToken = typeof res === 'string' ? res : (res.token || res.Token || res.data?.token || res.Data?.Token || res.result?.token || res.Result?.Token);
+            if (newToken) {
+              saveToken(newToken);
+              console.log("Token refreshed and saved successfully.");
+            }
+          }
         } catch (e) {
           console.error("Failed to refresh token", e);
         }
@@ -501,7 +510,15 @@ export default function App() {
       <div className="w-full h-[100dvh] md:w-full md:h-full landscape:w-full landscape:h-[100dvh] landscape:max-w-full landscape:max-h-full landscape:rounded-none landscape:border-none sm:w-[375px] sm:h-[667px] sm:max-h-[90vh] bg-white sm:rounded-[3rem] sm:shadow-[0_32px_64px_rgba(0,0,0,0.15)] overflow-hidden relative sm:border-[8px] sm:border-zinc-900 flex flex-col transition-all duration-300">
         
         {appState === 'splash' && (
-          <Splash onComplete={() => setAppStateWithTransition('login', 1)} />
+          <Splash onComplete={() => {
+            const token = localStorage.getItem('auth_token');
+            if (token) {
+              const verified = localStorage.getItem('auth_verified') === 'true';
+              setAppStateWithTransition(verified ? 'app' : 'auth', 1);
+            } else {
+              setAppStateWithTransition('login', 1);
+            }
+          }} />
         )}
 
         <AnimatePresence initial={false} custom={transitionDir}>
@@ -606,6 +623,7 @@ export default function App() {
                   >
                     {currentView === 'dashboard' && <Dashboard key={`dash-${refreshKey}`} />}
                     {currentView === 'doors' && <Doors key={`door-${refreshKey}`} />}
+                    {currentView === 'actions' && <Actions key={`action-${refreshKey}`} />}
                     {currentView === 'cameras' && <Cameras key={`cam-${refreshKey}`} />}
                     {currentView === 'chats' && <div key={`chat-${refreshKey}`} className="contents"><Chats onChatActive={(active) => setNavHidden(active)} onRefreshPage={() => setRefreshKey(prev => prev + 1)} /></div>}
                     {currentView === 'logs' && <Logs key={`log-${refreshKey}`} />}

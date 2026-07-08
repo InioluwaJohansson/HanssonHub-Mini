@@ -357,6 +357,16 @@ export const joinChatRoom = async (chatId: number) => {
   return response.data;
 };
 
+export const getAllActions = async () => {
+  const response = await api.post('/Action/GetAllActions', '');
+  return response.data;
+};
+
+export const activateDeactivateAction = async (id: number) => {
+  const response = await api.post(`/Action/ActivateDeactivateAction?id=${id}`, '');
+  return response.data;
+};
+
 export const getImageUrl = (img?: string) => {
   if (!img) return undefined;
   if (img.startsWith('data:') || img.startsWith('http://') || img.startsWith('https://')) return img;

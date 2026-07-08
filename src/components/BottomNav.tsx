@@ -1,7 +1,7 @@
-import { LayoutDashboard, Video, DoorClosed, MessageCircle, FileText } from 'lucide-react';
+import { LayoutDashboard, Video, DoorClosed, Play, MessageCircle, FileText } from 'lucide-react';
 import { getUserDetails } from '../utils/api';
 
-export type ViewType = 'dashboard' | 'cameras' | 'doors' | 'chats' | 'logs' | 'settings';
+export type ViewType = 'dashboard' | 'cameras' | 'doors' | 'actions' | 'chats' | 'logs' | 'settings';
 
 type NavItemProps = {
   icon: any;
@@ -54,6 +54,13 @@ export function BottomNav({ currentView, setView }: { currentView: ViewType, set
         activeColorClass="text-amber-600"
         active={currentView === 'doors'} 
         onClick={() => setView('doors')} 
+      />
+      <NavItem 
+        icon={Play} 
+        label="Actions" 
+        activeColorClass="text-indigo-600"
+        active={currentView === 'actions'} 
+        onClick={() => setView('actions')} 
       />
       <NavItem 
         icon={MessageCircle} 

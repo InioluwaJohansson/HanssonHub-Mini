@@ -62,16 +62,26 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
       setIsLoading(true);
       try {
         const response = await loginUser(username, password);
-        if (response.status && response.token) {
-          saveToken(response.token);
-          if (response.data) {
-            saveUserDetails(response.data);
+        const status = response?.status ?? response?.Status;
+        const token = response?.token ?? response?.Token;
+        if (status && token) {
+          saveToken(token);
+          const userDetails = response?.data ?? response?.Data;
+          if (userDetails) {
+            const userImg = response?.imageUrl ?? response?.ImageUrl;
+            if (userImg) {
+              userDetails.imageUrl = userImg;
+              userDetails.ImageUrl = userImg;
+              userDetails.profileImageUrl = userImg;
+              userDetails.ProfileImageUrl = userImg;
+            }
+            saveUserDetails(userDetails);
           }
           
           if (biometricAvailable) {
              const success = await registerBiometric(username);
              if (success) {
-                saveBiometricStoredToken(response.token);
+                saveBiometricStoredToken(token);
              }
           }
           

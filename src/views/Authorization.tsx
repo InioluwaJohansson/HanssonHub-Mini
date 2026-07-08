@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ShieldAlert, LoaderCircle, KeyRound, Delete, CheckCircle } from 'lucide-react';
-import { verifyAuthCode } from '../utils/api';
+import { verifyAuthCode, saveToken, saveUserDetails } from '../utils/api';
 
 export default function Authorization({ onSuccess, onFailMax }: { onSuccess: () => void, onFailMax: () => void }) {
   const [authCode, setAuthCode] = useState('');
@@ -39,9 +39,19 @@ export default function Authorization({ onSuccess, onFailMax }: { onSuccess: () 
           setAuthError('');
           try {
             const res = await verifyAuthCode(newCode);
-            const isVerified = typeof res === 'boolean' ? res : res?.status === true;
+            const isVerified = typeof res === 'boolean' ? res : (res?.status === true || res?.Status === true || res?.success === true || res?.Success === true);
             
             if (isVerified) {
+              const newToken = res?.token ?? res?.Token ?? res?.data?.token ?? res?.Data?.Token ?? res?.result?.token ?? res?.Result?.Token;
+              if (newToken) {
+                saveToken(newToken);
+              }
+              const userDetails = res?.data ?? res?.Data ?? res?.result ?? res?.Result;
+              if (userDetails && typeof userDetails === 'object' && !('token' in userDetails || 'Token' in userDetails)) {
+                const storedDetails = localStorage.getItem('user_details');
+                const merged = storedDetails ? { ...JSON.parse(storedDetails), ...userDetails } : userDetails;
+                saveUserDetails(merged);
+              }
               setSuccess(true);
               setTimeout(() => onSuccess(), 1000);
             } else {

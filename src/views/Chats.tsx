@@ -40,7 +40,7 @@ const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'incoming' = 'light'
 // Helper to convert cropped image
 const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<File> => {
   return new Promise((resolve, reject) => {
-    const image = new Image();
+    const image = new window.Image();
     image.src = imageSrc;
     image.onload = () => {
       const canvas = document.createElement('canvas');
@@ -3528,13 +3528,15 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
               
               <div className="flex items-center gap-2">
                 {/* Info Button to Open Group Details */}
-                <button 
-                  onClick={() => setShowChatInfo(true)}
-                  className="p-2 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-all"
-                  title={activeChat.isGroup ? "View Group Details" : "View Chat Info"}
-                >
-                  <Info size={20} />
-                </button>
+                {activeChat.isGroup && (
+                  <button 
+                    onClick={() => setShowChatInfo(true)}
+                    className="p-2 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-all"
+                    title="View Group Details"
+                  >
+                    <Info size={20} />
+                  </button>
+                )}
 
                 {/* Search Button */}
                 <button 
@@ -4172,8 +4174,10 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       </div>
                     </div>
 
-                    {/* Metadata summary with editable state */}
-                    <div className="flex flex-col items-center py-4 text-center border-b pb-6 mb-6 w-full">
+                    {/* Scrollable body content */}
+                    <div className="flex-1 overflow-y-auto pr-1 flex flex-col min-h-0">
+                      {/* Metadata summary with editable state */}
+                      <div className="flex flex-col items-center py-4 text-center border-b pb-6 mb-4 w-full">
                       {isEditingGroupChat ? (
                         <div className="w-full flex flex-col items-center gap-3">
                           <label className="text-[10px] text-zinc-400 font-extrabold uppercase tracking-widest leading-none">Group Image</label>
@@ -4348,7 +4352,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     </div>
                                        {/* Members List */}
                     {activeChat.isGroup && (
-                      <div className="flex-1 overflow-y-auto flex flex-col">
+                      <div className="flex flex-col mt-4">
                         <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-widest mb-3 flex items-center justify-between">
                           <span>Members ({activeChat.participants.length})</span>
                         </h4>
@@ -4469,6 +4473,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                         </div>
                       </div>
                     )}
+                    </div> {/* End of scrollable body content wrapper */}
                   </motion.div>
                 </motion.div>
               )}
