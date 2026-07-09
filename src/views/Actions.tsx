@@ -41,6 +41,12 @@ export default function Actions() {
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [expandedActionId, setExpandedActionId] = useState<number | null>(null);
   const [triggeredActions, setTriggeredActions] = useState<{ [id: number]: boolean }>({});
+
+  useEffect(() => {
+    if (actions.length > 0) {
+      (window as any).__cachedActions = actions;
+    }
+  }, [actions]);
   
   // Internal toasts for SignalR events
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'info' | 'success' | 'warn' }[]>([]);
@@ -83,7 +89,12 @@ export default function Actions() {
   };
 
   useEffect(() => {
-    fetchActions();
+    if (Array.isArray((window as any).__cachedActions) && (window as any).__cachedActions.length > 0) {
+      setActions((window as any).__cachedActions);
+      setLoading(false);
+    } else {
+      fetchActions();
+    }
 
     // SignalR listeners
     const handleActionTriggered = (data: any) => {

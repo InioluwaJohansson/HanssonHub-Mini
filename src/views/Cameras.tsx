@@ -17,11 +17,23 @@ export default function Cameras() {
   const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
+    if (cameras.length > 0) {
+      (window as any).__cachedCameras = cameras;
+    }
+  }, [cameras]);
+
+  useEffect(() => {
     const loadInitial = async () => {
+      if (Array.isArray((window as any).__cachedCameras) && (window as any).__cachedCameras.length > 0) {
+        setCameras((window as any).__cachedCameras);
+        return;
+      }
       try {
         const cached = await getAllData(STORES.CAMERAS);
         if (Array.isArray(cached) && cached.length > 0) {
           setCameras(cached as CameraData[]);
+          (window as any).__cachedCameras = cached;
+          return;
         }
       } catch (err) {
         console.warn("Camera cache load failed:", err);

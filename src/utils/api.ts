@@ -140,6 +140,16 @@ export const getAllDoorsByDoorType = async (doorType: number = 3) => {
   return response.data;
 };
 
+export const unlockDoor = async (id: number | string) => {
+  const response = await api.put(`/Door/UnlockDoor?id=${id}`);
+  return response.data;
+};
+
+export const lockDoor = async (id: number | string) => {
+  const response = await api.put(`/Door/LockDoor?id=${id}`);
+  return response.data;
+};
+
 export const getAllCameras = async () => {
   const response = await api.post('/Camera/GetAllCameras');
   return response.data;

@@ -673,6 +673,11 @@ type ChatRoom = {
 
 export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (isActive: boolean) => void, onRefreshPage?: () => void }) {
   const [localChatList, setLocalChatList] = useState<ChatRoom[]>([]);
+  useEffect(() => {
+    if (localChatList.length > 0) {
+      (window as any).__cachedChats = localChatList;
+    }
+  }, [localChatList]);
   const [activeChat, setActiveChat] = useState<ChatRoom | null>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [messageText, setMessageText] = useState('');
@@ -1659,7 +1664,19 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     const handleMessagesReadWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessagesRead]", ...args); handleMessagesRead(extractPayload(args[0])); };
     const handleUpdateChatWrapped = (...args: any[]) => {
       console.log("[HOME_SIGNALR_EVENT: UpdateChat]", ...args);
-      if (args.length >= 3 && args[0] === "MessagesRead") {
+      if (args.length >= 2 && (args[0] === "GroupChatCreated" || args[0] === "ChatCreated")) {
+        const chatData = extractPayload(args[1]);
+        if (chatData) {
+          handleChatCreated(chatData);
+          const chatId = chatData.id ?? chatData.Id;
+          const parsedId = Number(chatId);
+          if (!isNaN(parsedId)) {
+            homeSecurityHubConnection.invoke("JoinChat", parsedId)
+              .then(() => console.log(`[SignalR] Joined newly created chat: ${parsedId}`))
+              .catch(err => console.warn(`[SignalR] Failed to join newly created chat ${parsedId}:`, err));
+          }
+        }
+      } else if (args.length >= 3 && args[0] === "MessagesRead") {
         handleMessagesRead(extractPayload(args[2]));
       } else if (args.length >= 3 && args[0] === "MessageDeleted") {
         handleMessageDeleted(extractPayload(args[2]));
@@ -1903,13 +1920,17 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // Fetch All data from cache or network
   useEffect(() => {
     const loadInitial = async () => {
+      if (Array.isArray((window as any).__cachedChats) && (window as any).__cachedChats.length > 0) {
+        setLocalChatList((window as any).__cachedChats);
+        setIsChatsLoading(false);
+        return;
+      }
       try {
         const cached = await getAllData(STORES.CHATS);
         if (Array.isArray(cached) && cached.length > 0) {
           setLocalChatList(cached as ChatRoom[]);
+          (window as any).__cachedChats = cached;
           setIsChatsLoading(false);
-          // Still fetch in background to sync
-          fetchChats(true);
         } else {
           fetchChats();
         }
@@ -4360,8 +4381,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                         {isEditingGroupChat && (
                           <div className="flex flex-col gap-2 mb-6">
                               <h5 className="text-[10px] font-black uppercase text-zinc-400 border-b pb-1 mb-1">Available to Add</h5>
-                              <div className="max-h-40 overflow-y-auto flex flex-col gap-2 p-1">
-                                  {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).map(person => {
+                              <div className="flex flex-col gap-2 p-1">
+                                  {availablePersons.filter(person => !activeChat.participants.some(p => Number(p.personId || p.PersonId) === Number(person.id || person.Id))).map(person => {
                                     const pId = person.id || person.Id;
                                     const pName = person.name || person.Name || `User #${pId}`;
                                     const isSelected = selectedToAdd.includes(pId);
@@ -4372,8 +4393,12 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                         className="flex items-center justify-between p-2 rounded-xl bg-zinc-50 border border-zinc-100 hover:border-zinc-350 transition-colors cursor-pointer select-none"
                                       >
                                           <div className="flex items-center gap-2">
-                                              <div className="w-8 h-8 rounded-full bg-zinc-200 flex items-center justify-center font-bold text-xs text-zinc-700">
-                                                  {pName.charAt(0).toUpperCase()}
+                                              <div className="w-8 h-8 rounded-full bg-zinc-200 flex items-center justify-center font-bold text-xs text-zinc-700 overflow-hidden border border-zinc-300">
+                                                  {person.imageUrl || person.ImageUrl || person.profileImageUrl || person.ProfileImageUrl ? (
+                                                    <img src={getImageUrl(person.imageUrl || person.ImageUrl || person.profileImageUrl || person.ProfileImageUrl)} alt={pName} className="w-full h-full object-cover" />
+                                                  ) : (
+                                                    pName.charAt(0).toUpperCase()
+                                                  )}
                                               </div>
                                               <span className="text-xs font-bold text-zinc-800">{pName}</span>
                                           </div>
@@ -4383,7 +4408,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                       </div>
                                     );
                                   })}
-                                  {availablePersons.filter(person => !activeChat.participants.some(p => (p.personId || p.PersonId) === (person.id || person.Id))).length === 0 && (
+                                  {availablePersons.filter(person => !activeChat.participants.some(p => Number(p.personId || p.PersonId) === Number(person.id || person.Id))).length === 0 && (
                                     <p className="text-xs text-zinc-400 text-center py-2">All available users are already in this group.</p>
                                   )}
                               </div>
@@ -4412,9 +4437,9 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                               })
                               .map((p, index) => {
                                 const pId = p.personId ?? p.PersonId ?? index;
-                                const personInfo = availablePersons.find(ap => (ap.id || ap.Id) === pId);
+                                const personInfo = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(pId));
                                 const fName = personInfo?.name || personInfo?.Name || p.fullName || p.FullName || `User #${pId}`;
-                                const pImg = personInfo?.imageUrl || personInfo?.ImageUrl;
+                                const pImg = personInfo?.imageUrl || personInfo?.ImageUrl || personInfo?.profileImageUrl || personInfo?.ProfileImageUrl || p.profileImageUrl || p.ProfileImageUrl || p.imageUrl || p.ImageUrl;
                                 const isPAdmin = !!(p.isAdmin ?? p.IsAdmin);
                                 const onlineStatus = (Number(pId) === Number(currentUserId)) || onlineUsers.has(Number(pId)) || !!(p.isOnline ?? p.IsOnline);
 
@@ -4545,12 +4570,12 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 <input type="text" placeholder="Description (Optional)" value={newGroupDescription} onChange={e => setNewGroupDescription(e.target.value)} className="w-full py-2 bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none text-sm focus:outline-none transition-colors text-black font-semibold" />
                 <div className="flex flex-col gap-2 w-full pt-1">
                   <label className="text-xs text-zinc-400 font-extrabold uppercase tracking-widest">Select Group Members</label>
-                  <div className="grid grid-cols-1 gap-2 max-h-48 overflow-y-auto p-2 bg-zinc-50 border border-zinc-200 rounded-2xl">
+                  <div className="grid grid-cols-1 gap-2 p-2 bg-zinc-50 border border-zinc-200 rounded-2xl">
                     {availablePersons.map(person => {
                       const personId = person.id || person.Id;
                       const isSelected = newGroupParticipants.includes(personId);
                       const pName = person.name || person.Name || "Unknown Person";
-                      const pImg = person.imageUrl || person.ImageUrl;
+                      const pImg = person.imageUrl || person.ImageUrl || person.profileImageUrl || person.ProfileImageUrl;
                       
                       return (
                         <div 

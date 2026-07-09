@@ -18,10 +18,12 @@ import { playNotificationSound } from './utils/audio';
 import { clearAllStores, clearStore, STORES } from './utils/db';
 
 import Logs from './views/Logs';
+import { useLogs } from './context/LogsContext';
 
 type AppState = 'splash' | 'login' | 'auth' | 'app';
 
 export default function App() {
+  const { clearLogs } = useLogs();
   const [appState, setAppState] = useState<AppState>(() => {
     const token = localStorage.getItem('auth_token');
     if (!token) return 'splash';
@@ -385,13 +387,28 @@ export default function App() {
     localStorage.setItem('current_view', currentView);
   }, [currentView]);
 
+  const clearCachesForView = (view: ViewType) => {
+    if (view === 'doors') {
+      delete (window as any).__cachedDoors;
+    } else if (view === 'actions') {
+      delete (window as any).__cachedActions;
+    } else if (view === 'cameras') {
+      delete (window as any).__cachedCameras;
+      clearStore(STORES.CAMERAS).catch(err => console.warn("Failed to clear cameras store on refresh:", err));
+    } else if (view === 'chats') {
+      delete (window as any).__cachedChats;
+      clearStore(STORES.CHATS).catch(err => console.warn("Failed to clear chats store on refresh:", err));
+    } else if (view === 'logs') {
+      clearLogs();
+      clearStore(STORES.LOGS).catch(err => console.warn("Failed to clear logs store on refresh:", err));
+    }
+  };
+
   const handleScroll = (e: React.UIEvent<HTMLElement>) => {
     const el = e.currentTarget;
     if (el.scrollTop < -40 && !isPulling && !navHidden) {
       setIsPulling(true);
-      if (currentView === 'chats') {
-        clearStore(STORES.CHATS).catch(err => console.warn("Failed to clear chats store on scroll refresh:", err));
-      }
+      clearCachesForView(currentView);
       setRefreshKey(prev => prev + 1);
       setTimeout(() => setIsPulling(false), 1500);
     }
@@ -417,9 +434,7 @@ export default function App() {
   const handleTouchEnd = () => {
     if (pullDistance > 80 && !isPulling && !navHidden) {
       setIsPulling(true);
-      if (currentView === 'chats') {
-        clearStore(STORES.CHATS).catch(err => console.warn("Failed to clear chats store on pull refresh:", err));
-      }
+      clearCachesForView(currentView);
       setRefreshKey(prev => prev + 1);
       setTimeout(() => {
         setIsPulling(false);
