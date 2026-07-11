@@ -3530,20 +3530,35 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                       }
                     })()}
                   </h3>
-                  {!activeChat.isGroup ? (
-                    <p className="text-[10px] text-green-600 font-bold uppercase tracking-wider flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span> Online</p>
-                  ) : (
-                    <p className="text-[10px] text-green-600 font-medium tracking-tight truncate max-w-[180px] sm:max-w-[280px]">
-                      {activeChat.participants && activeChat.participants.length > 0
-                        ? activeChat.participants.map((p: any) => {
-                            const pid = p.personId || p.PersonId || p.id || p.Id;
-                            const cachedPerson = availablePersons.find(ap => (ap.id || ap.Id) === pid);
-                            const nameStr = cachedPerson?.name || cachedPerson?.Name || p.fullName || p.FullName || p.Name || `User #${pid}`;
-                            return nameStr.split(' ')[0];
-                          }).filter(Boolean).join(', ')
-                        : 'online encryption active'}
-                    </p>
-                  )}
+                  {(() => {
+                    if (!activeChat.isGroup) {
+                      const partner = activeChat.participants?.find((p: any) => {
+                        const pId = p.personId || p.PersonId || p.id || p.Id;
+                        return Number(pId) !== Number(currentUserId);
+                      });
+                      const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                      const isOnline = partnerId && (onlineUsers.has(Number(partnerId)) || !!(partner?.isOnline ?? partner?.IsOnline));
+                      return (
+                        <p className={`text-[10px] ${isOnline ? 'text-green-600' : 'text-zinc-500'} font-bold uppercase tracking-wider flex items-center gap-1`}>
+                          {isOnline && <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>}
+                          {isOnline ? "Online" : "Offline"}
+                        </p>
+                      );
+                    } else {
+                      return (
+                        <p className="text-[10px] text-green-600 font-medium tracking-tight truncate max-w-[180px] sm:max-w-[280px]">
+                          {activeChat.participants && activeChat.participants.length > 0
+                            ? activeChat.participants.map((p: any) => {
+                                const pid = p.personId || p.PersonId || p.id || p.Id;
+                                const cachedPerson = availablePersons.find(ap => (ap.id || ap.Id) === pid);
+                                const nameStr = cachedPerson?.name || cachedPerson?.Name || p.fullName || p.FullName || p.Name || `User #${pid}`;
+                                return nameStr.split(' ')[0];
+                              }).filter(Boolean).join(', ')
+                            : 'online encryption active'}
+                        </p>
+                      );
+                    }
+                  })()}
                 </div>
               </div>
               
@@ -3749,7 +3764,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                             } ${msg.isMe ? 'rounded-tr-none' : 'rounded-tl-none'}`}
                           >
                             
-                            {!msg.isMe && (
+                            {!msg.isMe && activeChat.isGroup && (
                               <p className="text-[10px] font-bold text-indigo-600 mb-1">{msg.senderName}</p>
                             )}
 
@@ -3785,11 +3800,11 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                 {msg.attachments && msg.attachments.length > 0 ? (
                                   <div className="flex flex-col gap-2 max-w-sm">
                                     {renderMsgAttachments(msg)}
-                                    {msg.text && <p className={`text-xs pt-1 break-words font-medium ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>}
+                                    {msg.text && <p className={`text-xs pt-1 break-words font-medium whitespace-pre-wrap ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>}
                                   </div>
                                 ) : (
                                   msg.type === 'text' && (
-                                    <p className={`text-xs break-words font-medium ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>
+                                    <p className={`text-xs break-words font-medium whitespace-pre-wrap ${msg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{msg.text}</p>
                                   )
                                 )}
                                 
@@ -4892,20 +4907,20 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                 style={{
                   position: 'absolute',
                   top: pressedMessageRect.top,
-                  left: pressedMessageRect.left,
+                  ...(overlayMsg.isMe ? { right: window.innerWidth - pressedMessageRect.right } : { left: pressedMessageRect.left }),
                   width: pressedMessageRect.width,
                   minHeight: pressedMessageRect.height,
                   margin: 0,
                   pointerEvents: 'none',
                   ...(overlayMsg.isMe ? { backgroundColor: chatThemeColor, borderColor: chatThemeColor, color: 'white' } : {})
                 }}
-                className={`p-2.5 rounded-md shadow-lg border ${
+                className={`p-2.5 rounded-md shadow-lg border max-w-[90%] inline-block ${
                   overlayMsg.isMe 
                     ? 'text-white' 
                     : 'bg-white border-zinc-200 dark:bg-[#1c1c1e] dark:border-[#1c1c1e] dark:text-zinc-200 shadow-md'
                 } ${overlayMsg.isMe ? 'rounded-tr-none' : 'rounded-tl-none'} scale-100 z-[160] overflow-visible`}
               >
-                {!overlayMsg.isMe && (
+                {!overlayMsg.isMe && activeChat?.isGroup && (
                   <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 mb-1">{overlayMsg.senderName}</p>
                 )}
 
@@ -4915,12 +4930,17 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   </div>
                 )}
 
-                {overlayMsg.text && (
-                  <p className={`text-xs break-words font-medium whitespace-pre-wrap ${overlayMsg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{overlayMsg.text}</p>
+                {overlayMsg.attachments && overlayMsg.attachments.length > 0 ? (
+                  <div className="flex flex-col gap-2 max-w-sm">
+                    {renderMsgAttachments(overlayMsg)}
+                    {overlayMsg.text && <p className={`text-xs pt-1 break-words font-medium whitespace-pre-wrap ${overlayMsg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{overlayMsg.text}</p>}
+                  </div>
+                ) : (
+                  overlayMsg.type === 'text' && overlayMsg.text && (
+                    <p className={`text-xs break-words font-medium whitespace-pre-wrap ${overlayMsg.isMe ? 'text-white' : 'text-zinc-800 dark:text-zinc-200'}`}>{overlayMsg.text}</p>
+                  )
                 )}
-                
-                {renderMsgAttachments(overlayMsg)}
-                
+                                
                 {overlayMsg.type === 'audio' && !overlayMsg.attachments?.length && (
                   <VoicePlayer mediaUrl={overlayMsg.mediaUrl} duration={overlayMsg.duration} />
                 )}

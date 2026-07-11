@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { DoorOpen, DoorClosed, Lock, Unlock, Search } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getAllDoorsByDoorType, lockDoor, unlockDoor } from '../utils/api';
+import { getAllDoorsByDoorType, lockDoor, unlockDoor, updateDoor } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 
 type DoorData = {
@@ -142,7 +142,6 @@ export default function Doors() {
   const toggleLock = async (id: string) => {
     try {
       await lockDoor(id);
-      setDoors(prev => prev.map(d => d.id === id ? { ...d, isLocked: !d.isLocked } : d));
     } catch (err) {
       console.error("Failed to toggle lock for door", id, err);
     }
@@ -151,7 +150,6 @@ export default function Doors() {
   const toggleOpen = async (id: string) => {
     try {
       await unlockDoor(id);
-      setDoors(prev => prev.map(d => d.id === id ? { ...d, isOpen: !d.isOpen } : d));
     } catch (err) {
       console.error("Failed to toggle open/close for door", id, err);
     }

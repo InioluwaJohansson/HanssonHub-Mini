@@ -1,11 +1,17 @@
-import { useEffect } from 'react';
-import { Camera, ShieldCheck, FileText, LayoutDashboard } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Camera, ShieldCheck, ShieldAlert, FileText, LayoutDashboard, DoorClosed, Play, Pause, LoaderCircle } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
 import { motion } from 'motion/react';
-import { getImageUrl } from '../utils/api';
+import { getImageUrl, getAllDoors, getAllCameras, getAllActions, activateDeactivateAction } from '../utils/api';
+import { homeSecurityHubConnection } from '../utils/signalr';
 
 export default function Dashboard() {
   const { logs, fetchLogs } = useLogs();
+  const [doors, setDoors] = useState<any[]>([]);
+  const [cameras, setCameras] = useState<any[]>([]);
+  const [actions, setActions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [togglingActionId, setTogglingActionId] = useState<number | null>(null);
   
   useEffect(() => {
     if (logs.length === 0) {
@@ -13,8 +19,207 @@ export default function Dashboard() {
     }
   }, [logs.length, fetchLogs]);
 
-  // Take first 10 for dashboard preview
-  const recentLogs = logs.slice(0, 10);
+  // Load initial stats
+  useEffect(() => {
+    let active = true;
+
+    const loadData = async () => {
+      try {
+        const [doorsRes, camerasRes, actionsRes] = await Promise.all([
+          getAllDoors(),
+          getAllCameras(),
+          getAllActions()
+        ]);
+
+        if (active) {
+          // Parse Doors
+          const doorsData = doorsRes?.data ?? doorsRes?.Data ?? doorsRes ?? [];
+          setDoors(doorsData.map((d: any, index: number) => ({
+            id: String(d.id ?? d.Id ?? index),
+            isLocked: d.isLocked ?? d.IsLocked ?? true,
+            isOpen: d.isOpen ?? d.IsOpen ?? false,
+            name: d.doorName ?? d.DoorName ?? d.name ?? d.Name ?? `Door ${d.id ?? d.Id ?? index}`,
+            doorType: d.doorType ?? d.DoorType
+          })));
+
+          // Parse Cameras
+          const camerasData = camerasRes?.data ?? camerasRes?.Data ?? camerasRes ?? [];
+          setCameras(camerasData);
+
+          // Parse Actions
+          const actionsData = actionsRes?.data ?? actionsRes?.Data ?? actionsRes?.result ?? actionsRes?.Result ?? actionsRes ?? [];
+          setActions(actionsData);
+        }
+      } catch (err) {
+        console.error("Dashboard failed to load initial data:", err);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    loadData();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Listen to SignalR events for real-time status updates
+  useEffect(() => {
+    const handleDoorCreated = (data: any) => {
+      setDoors(prev => {
+        const idVal = String(data.id ?? data.Id);
+        if (prev.some(d => d.id === idVal)) return prev;
+        return [...prev, {
+          id: idVal,
+          isLocked: data.isLocked ?? data.IsLocked ?? true,
+          isOpen: data.isOpen ?? data.IsOpen ?? false,
+          name: data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? `Door ${idVal}`,
+          doorType: data.doorType ?? data.DoorType
+        }];
+      });
+    };
+
+    const handleDoorUpdated = (data: any) => {
+      setDoors(prev => prev.map(d => {
+        const targetId = String(data.id ?? data.Id);
+        if (d.id === targetId) {
+          return {
+            ...d,
+            name: data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? d.name,
+            isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked,
+            isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen,
+            doorType: data.doorType ?? data.DoorType ?? d.doorType
+          };
+        }
+        return d;
+      }));
+    };
+
+    const handleDoorTriggered = (data: any) => {
+      const triggeredId = String(data.id ?? data.Id);
+      setDoors(prev => prev.map(d => {
+        if (d.id === triggeredId) {
+          return {
+            ...d,
+            isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked,
+            isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen
+          };
+        }
+        return d;
+      }));
+    };
+
+    const handleDoorDeleted = (data: any) => {
+      const deletedId = String(data.id ?? data.Id);
+      setDoors(prev => prev.filter(d => d.id !== deletedId));
+    };
+
+    const handleCameraCreated = (data: any) => {
+      setCameras(prev => {
+        const idVal = String(data.id ?? data.Id);
+        if (prev.some(c => String(c.id ?? c.Id) === idVal)) return prev;
+        return [...prev, data];
+      });
+    };
+
+    const handleCameraDeleted = (data: any) => {
+      const deletedId = String(data.id ?? data.Id);
+      setCameras(prev => prev.filter(c => String(c.id ?? c.Id) !== deletedId));
+    };
+
+    const handleActionCreated = () => {
+      getAllActions().then(res => {
+        const data = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
+        setActions(data);
+      });
+    };
+    
+    const handleActionUpdated = () => {
+      getAllActions().then(res => {
+        const data = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
+        setActions(data);
+      });
+    };
+
+    const handleActionActivationChanged = (data: any) => {
+      const actId = Number(data?.actionId ?? data?.ActionId);
+      const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
+      setActions(prev => prev.map(act => {
+        const currId = act.id ?? act.Id;
+        if (Number(currId) === actId) {
+          return {
+            ...act,
+            actionActive: isActive,
+            ActionActive: isActive
+          };
+        }
+        return act;
+      }));
+    };
+
+    const handleActionDeleted = (data: any) => {
+      const actId = Number(data?.actionId ?? data?.ActionId);
+      setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
+    };
+
+    homeSecurityHubConnection.on("DoorCreated", handleDoorCreated);
+    homeSecurityHubConnection.on("DoorUpdated", handleDoorUpdated);
+    homeSecurityHubConnection.on("DoorTriggered", handleDoorTriggered);
+    homeSecurityHubConnection.on("DoorDeleted", handleDoorDeleted);
+    homeSecurityHubConnection.on("CameraCreated", handleCameraCreated);
+    homeSecurityHubConnection.on("CameraDeleted", handleCameraDeleted);
+    homeSecurityHubConnection.on('ActionCreated', handleActionCreated);
+    homeSecurityHubConnection.on('ActionUpdated', handleActionUpdated);
+    homeSecurityHubConnection.on('ActionActivationChanged', handleActionActivationChanged);
+    homeSecurityHubConnection.on('ActionDeleted', handleActionDeleted);
+
+    return () => {
+      homeSecurityHubConnection.off("DoorCreated", handleDoorCreated);
+      homeSecurityHubConnection.off("DoorUpdated", handleDoorUpdated);
+      homeSecurityHubConnection.off("DoorTriggered", handleDoorTriggered);
+      homeSecurityHubConnection.off("DoorDeleted", handleDoorDeleted);
+      homeSecurityHubConnection.off("CameraCreated", handleCameraCreated);
+      homeSecurityHubConnection.off("CameraDeleted", handleCameraDeleted);
+      homeSecurityHubConnection.off('ActionCreated', handleActionCreated);
+      homeSecurityHubConnection.off('ActionUpdated', handleActionUpdated);
+      homeSecurityHubConnection.off('ActionActivationChanged', handleActionActivationChanged);
+      homeSecurityHubConnection.off('ActionDeleted', handleActionDeleted);
+    };
+  }, []);
+
+  const handleToggleAction = async (actionId: number) => {
+    if (togglingActionId !== null) return;
+    setTogglingActionId(actionId);
+    try {
+      await activateDeactivateAction(actionId);
+      setActions(prev => prev.map(act => {
+        const id = act.id ?? act.Id;
+        if (id === actionId) {
+          const current = act.actionActive ?? act.ActionActive ?? false;
+          return { ...act, actionActive: !current, ActionActive: !current };
+        }
+        return act;
+      }));
+    } catch (err) {
+      console.error("Failed to toggle action from dashboard", err);
+    } finally {
+      setTogglingActionId(null);
+    }
+  };
+
+  // State checks
+  const allDoorsLocked = doors.length > 0 && doors.every(d => d.isLocked);
+  const recentLogs = logs.slice(0, 5);
+
+  if (loading) {
+    return (
+      <div className="p-5 flex flex-col gap-3 min-h-[400px] justify-center items-center">
+        <LoaderCircle size={36} className="animate-spin text-indigo-600" />
+        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-2">Loading Dashboard Overview...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-5 flex flex-col gap-3">
@@ -23,11 +228,44 @@ export default function Dashboard() {
         <p className="text-xs text-zinc-500 font-medium tracking-wide">System overview and recent activity</p>
       </motion.div>
       
+      {/* Overview Stats Cards */}
       <div className="grid grid-cols-1 gap-3">
+        {/* Card 1: Security Card (MUST be above Cameras card) */}
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }} 
           animate={{ opacity: 1, scale: 1 }} 
           transition={{ duration: 0.4, delay: 0.1 }}
+          className={`border p-4 flex items-center justify-between rounded-xl shadow-sm transition-colors duration-300 ${
+            allDoorsLocked 
+              ? 'border-emerald-100 bg-emerald-50/50 text-emerald-950' 
+              : 'border-amber-100 bg-amber-50/50 text-amber-950'
+          }`}
+        >
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 bg-white shadow-sm flex items-center justify-center rounded-xl border ${
+              allDoorsLocked ? 'border-emerald-100 text-emerald-600' : 'border-amber-100 text-amber-600'
+            }`}>
+              {allDoorsLocked ? <ShieldCheck size={24} /> : <ShieldAlert size={24} />}
+            </div>
+            <div>
+              <p className="font-bold tracking-tight">Security</p>
+              <p className={`text-xs font-bold tracking-tight mt-0.5 ${allDoorsLocked ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {allDoorsLocked ? 'All Secure' : 'Attention Required'}
+              </p>
+            </div>
+          </div>
+          <span className={`text-[10px] font-black uppercase px-2.5 py-1 rounded-md transition-colors duration-300 ${
+            allDoorsLocked ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+          }`}>
+            {allDoorsLocked ? 'Secured' : 'Doors Unlocked'}
+          </span>
+        </motion.div>
+
+        {/* Card 2: Cameras Card */}
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }} 
+          animate={{ opacity: 1, scale: 1 }} 
+          transition={{ duration: 0.4, delay: 0.2 }}
           className="border border-indigo-100 p-4 bg-indigo-50/50 flex items-center justify-between rounded-xl shadow-sm"
         >
           <div className="flex items-center gap-4">
@@ -36,30 +274,122 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="font-bold text-indigo-950 tracking-tight">Cameras</p>
-              <p className="text-xs text-indigo-600 font-medium tracking-tight mt-0.5">4 Online</p>
+              <p className="text-xs text-indigo-600 font-medium tracking-tight mt-0.5">
+                {cameras.length} {cameras.length === 1 ? 'Camera' : 'Cameras'} Online
+              </p>
             </div>
           </div>
+          <span className="text-[10px] font-black uppercase px-2.5 py-1 bg-indigo-100 text-indigo-800 rounded-md">
+            Live
+          </span>
         </motion.div>
-        
+
+        {/* Card 3: Doors Count Card */}
         <motion.div 
           initial={{ opacity: 0, scale: 0.95 }} 
           animate={{ opacity: 1, scale: 1 }} 
-          transition={{ duration: 0.4, delay: 0.2 }}
-          className="border border-emerald-100 p-4 bg-emerald-50/50 flex items-center justify-between rounded-xl shadow-sm"
+          transition={{ duration: 0.4, delay: 0.3 }}
+          className="border border-purple-100 p-4 bg-purple-50/50 flex items-center justify-between rounded-xl shadow-sm"
         >
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white shadow-sm border border-emerald-100 flex items-center justify-center text-emerald-600 rounded-xl">
-              <ShieldCheck size={24} />
+            <div className="w-12 h-12 bg-white shadow-sm border border-purple-100 flex items-center justify-center text-purple-600 rounded-xl">
+              <DoorClosed size={24} />
             </div>
             <div>
-              <p className="font-bold text-emerald-950 tracking-tight">Security</p>
-              <p className="text-xs text-emerald-600 font-medium tracking-tight mt-0.5">All Secure</p>
+              <p className="font-bold text-purple-950 tracking-tight">Doors</p>
+              <p className="text-xs text-purple-600 font-medium tracking-tight mt-0.5">
+                {doors.length} {doors.length === 1 ? 'Door' : 'Doors'} Connected
+              </p>
             </div>
           </div>
+          <span className="text-[10px] font-black uppercase px-2.5 py-1 bg-purple-100 text-purple-800 rounded-md">
+            {doors.filter(d => !d.isLocked).length} Unlocked
+          </span>
         </motion.div>
       </div>
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.3 }} className="mt-4 text-left">
+      {/* Quick Actions Component (Displays at least 2 actions side-by-side) */}
+      <motion.div 
+        initial={{ opacity: 0, y: 10 }} 
+        animate={{ opacity: 1, y: 0 }} 
+        transition={{ duration: 0.4, delay: 0.4 }} 
+        className="mt-4 text-left"
+      >
+        <h3 className="text-xs font-bold text-indigo-900 uppercase tracking-widest mb-3 flex items-center gap-2">
+           <Play size={14} /> Quick Actions
+        </h3>
+        
+        <div className="grid grid-cols-2 gap-3">
+          {actions.slice(0, 2).map((action, idx) => {
+            const actId = action.id ?? action.Id;
+            const name = action.actionName ?? action.ActionName ?? `Action #${actId}`;
+            const isActive = action.actionActive ?? action.ActionActive ?? false;
+            const isToggling = togglingActionId === actId;
+            
+            return (
+              <div 
+                key={actId ?? idx} 
+                className={`border p-4 bg-white dark:bg-zinc-900 rounded-xl shadow-sm flex flex-col justify-between gap-3 relative overflow-hidden transition-all duration-200 ${
+                  isActive 
+                    ? 'border-indigo-100 dark:border-indigo-950 ring-1 ring-indigo-50 dark:ring-indigo-950/30' 
+                    : 'border-zinc-200 dark:border-zinc-800'
+                }`}
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="font-black text-zinc-800 dark:text-zinc-100 text-sm truncate">{name}</p>
+                  <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium mt-1">
+                    {action.actionDescription ?? action.ActionDescription ?? "Automation macro"}
+                  </p>
+                </div>
+                
+                <div className="flex items-center justify-between gap-2 mt-2">
+                  <span className={`text-[9px] font-bold uppercase px-2.5 py-1 rounded-full ${
+                    isActive 
+                      ? 'bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-300' 
+                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                  }`}>
+                    {isActive ? 'Active' : 'Inactive'}
+                  </span>
+                  
+                  <button 
+                    onClick={() => handleToggleAction(actId)}
+                    disabled={isToggling}
+                    className={`p-2 flex items-center justify-center rounded-xl border transition-all ${
+                      isActive 
+                        ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-100 dark:border-indigo-900/50 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900/60' 
+                        : 'bg-zinc-50 dark:bg-zinc-800/50 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    {isToggling ? (
+                      <LoaderCircle size={18} className="animate-spin text-indigo-600 dark:text-indigo-400" />
+                    ) : isActive ? (
+                      <Pause size={18} fill="currentColor" />
+                    ) : (
+                      <Play size={18} fill="currentColor" />
+                    )}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          
+          {/* Fallback to show mock templates if fewer than 2 actions exist in the database */}
+          {actions.length < 2 && Array.from({ length: 2 - actions.length }).map((_, i) => (
+            <div 
+              key={`mock-${i}`} 
+              className="border border-dashed border-zinc-200 dark:border-zinc-800 p-3.5 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-xl flex flex-col justify-center items-center gap-1.5 py-6"
+            >
+              <Play size={18} className="text-zinc-300 dark:text-zinc-700" />
+              <p className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-widest text-center">
+                Action Spot Available
+              </p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+
+      {/* Recent Logs Section */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.5 }} className="mt-4 text-left">
         <h3 className="text-xs font-bold text-indigo-900 uppercase tracking-widest mb-3 flex items-center gap-2">
            <FileText size={14} /> Recent Logs
         </h3>
@@ -72,40 +402,41 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="flex flex-col gap-3">
-          {recentLogs.map((log, index) => (
-            <div key={log.Id ?? (log as any).id ?? index} className="flex flex-col">
-              <div className="bg-white p-3 rounded-xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow relative">
-                <div className="flex items-center gap-3 mb-2 pb-2 border-b border-zinc-50">
-                  {(() => {
-                    const imageUrl = log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
-                    const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
-                    return imageUrl ? (
-                      <img 
-                        src={getImageUrl(imageUrl)} 
-                        alt="" 
-                        className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
-                      />
-                    ) : (
-                      <div className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 bg-slate-200 flex items-center justify-center font-bold text-slate-600 text-[10px] uppercase">
-                        {firstName.charAt(0)}
-                      </div>
-                    );
-                  })()}
-                  <div className="flex-1 flex justify-between items-center">
-                    <p className="font-bold text-zinc-900 text-xs">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
-                    <p className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 tracking-wider uppercase">{log.ActionType || (log as any).actionType}</p>
+            {recentLogs.map((log, index) => (
+              <div key={log.Id ?? (log as any).id ?? index} className="flex flex-col">
+                <div className="bg-white p-3 rounded-xl border border-zinc-100 shadow-sm hover:shadow-md transition-shadow relative">
+                  <div className="flex items-center gap-3 mb-2 pb-2 border-b border-zinc-50">
+                    {(() => {
+                      const imageUrl = log.GetPersonDto?.GetPersonDetailsDto?.ImageUrl || (log as any).getPersonDto?.getPersonDetailsDto?.imageUrl;
+                      const firstName = log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName || '?';
+                      return imageUrl ? (
+                        <img 
+                          src={getImageUrl(imageUrl)} 
+                          alt="" 
+                          className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 object-cover" 
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full border border-zinc-200 flex-shrink-0 bg-slate-200 flex items-center justify-center font-bold text-slate-600 text-[10px] uppercase">
+                          {firstName.charAt(0)}
+                        </div>
+                      );
+                    })()}
+                    <div className="flex-1 flex justify-between items-center">
+                      <p className="font-bold text-zinc-900 text-xs">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
+                      <p className="text-[9px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 tracking-wider uppercase">{log.ActionType || (log as any).actionType}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-zinc-600 font-medium">{log.LogDetails || (log as any).logDetails}</p>
+                  <div className="mt-2 flex justify-end">
+                     <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block text-right">
+                       {new Date(log.TimeOfAction || (log as any).timeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                     </span>
                   </div>
                 </div>
-                <p className="text-xs text-zinc-600 font-medium">{log.LogDetails || (log as any).logDetails}</p>
-                <div className="mt-2 flex justify-end">
-                   <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block text-right">
-                     {new Date(log.TimeOfAction || (log as any).timeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                   </span>
-                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
         )}
       </motion.div>
     </div>

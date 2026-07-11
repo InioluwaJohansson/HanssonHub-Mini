@@ -140,6 +140,11 @@ export const getAllDoorsByDoorType = async (doorType: number = 3) => {
   return response.data;
 };
 
+export const getAllDoors = async () => {
+  const response = await api.post('/Door/GetAllDoors');
+  return response.data;
+};
+
 export const unlockDoor = async (id: number | string) => {
   const response = await api.put(`/Door/UnlockDoor?id=${id}`);
   return response.data;
@@ -147,6 +152,11 @@ export const unlockDoor = async (id: number | string) => {
 
 export const lockDoor = async (id: number | string) => {
   const response = await api.put(`/Door/LockDoor?id=${id}`);
+  return response.data;
+};
+
+export const updateDoor = async (door: any) => {
+  const response = await api.put('/Door/UpdateDoor', door);
   return response.data;
 };
 
@@ -175,24 +185,32 @@ export const createDirectChat = async (recipientPersonId: number) => {
   return response.data;
 };
 
-export const createGroupChat = async (name: string, description: string, participantPersonIds: number[], imageFile: File | null) => {
-  const formData = new FormData();
-  if (imageFile) {
-    formData.append('ImageUrl', imageFile);
-  }
-  
-  const params = new URLSearchParams();
-  params.append('Name', name);
-  if (description) {
-    params.append('Description', description);
-  }
-  participantPersonIds.forEach(id => {
-    params.append('ParticipantPersonIds', id.toString());
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
   });
+};
+
+export const createGroupChat = async (name: string, description: string, participantPersonIds: number[], imageFile: File | null) => {
+  let imageUrl = "";
+  if (imageFile) {
+    imageUrl = await fileToBase64(imageFile);
+  }
+
+  const payload = {
+    name,
+    description,
+    imageUrl,
+    participantPersonIds
+  };
   
-  const response = await api.post(`/Chat/CreateGroupChat?${params.toString()}`, formData, {
+  const response = await api.post(`/Chat/CreateGroupChat`, payload, {
     headers: {
-      'Content-Type': 'multipart/form-data',
+      'Content-Type': 'application/json',
+      'accept': '*/*'
     }
   });
   return response.data;
@@ -334,19 +352,22 @@ export const getUnreadCount = async (chatId: number) => {
 };
 
 export const updateGroupChat = async (chatId: number, name?: string, description?: string, imageFile?: File | null) => {
-  const formData = new FormData();
+  let imageUrl = "";
   if (imageFile) {
-    formData.append('ImageUrl', imageFile);
+    imageUrl = await fileToBase64(imageFile);
   }
+
+  const payload = {
+    chatId,
+    name: name || "",
+    description: description || "",
+    imageUrl
+  };
   
-  const params = new URLSearchParams();
-  params.append('ChatId', chatId.toString());
-  if (name) params.append('Name', name);
-  if (description) params.append('Description', description);
-  
-  const response = await api.put(`/Chat/UpdateGroupChat?${params.toString()}`, formData, {
+  const response = await api.put(`/Chat/UpdateGroupChat`, payload, {
     headers: {
-      'Content-Type': 'multipart/form-data',
+      'Content-Type': 'application/json',
+      'accept': '*/*'
     }
   });
   return response.data;

@@ -214,7 +214,7 @@ export default function Actions() {
       {/* View Header */}
       <div className="flex flex-col gap-1 mb-3">
         <h3 className="text-3xl font-black text-zinc-900 flex items-center gap-2">
-          <Play size={32} className="text-indigo-600 fill-indigo-600" /> Actions
+          <Play size={32} className="text-indigo-600" /> Actions
         </h3>
         <p className="text-xs text-zinc-500 font-medium tracking-wide">Automate and activate system-wide macros</p>
       </div>
@@ -324,18 +324,13 @@ export default function Actions() {
                       : 'border-zinc-200'
                   }`}
                 >
-                  {/* Status Indicator Bar */}
-                  <div className={`absolute top-0 left-0 w-1.5 h-full transition-colors ${
-                    isRecentlyTriggered ? 'bg-indigo-600' : isActive ? 'bg-indigo-500' : 'bg-zinc-300'
-                  }`}></div>
-
                   <div 
-                    className="p-4 pl-5 flex flex-col gap-1.5 select-none"
+                    className="p-4 flex flex-col gap-1.5 select-none"
                   >
                     <div className="flex justify-between items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <Play size={18} className={`${isActive ? 'text-indigo-600 fill-indigo-600' : 'text-zinc-400 fill-zinc-400'} shrink-0`} />
+                          <Play size={18} className={`${isActive ? 'text-indigo-600' : 'text-zinc-400'} shrink-0`} />
                           <p className="font-black text-zinc-900 text-base truncate">{name}</p>
                           {isRecentlyTriggered && (
                             <span className="bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md animate-pulse shrink-0">

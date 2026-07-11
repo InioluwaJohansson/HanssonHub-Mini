@@ -4,11 +4,13 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getAllCameras } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 import { saveData, getAllData, STORES } from '../utils/db';
+import HLSPlayer from '../components/HLSPlayer';
 
 type CameraData = {
   id: string;
   name: string;
   imgUrl: string;
+  streamUrl?: string;
 };
 
 export default function Cameras() {
@@ -49,7 +51,8 @@ export default function Cameras() {
             id: String(c.id ?? c.Id ?? index),
             name: c.name ?? c.Name ?? `Camera ${c.id ?? c.Id ?? index}`,
             // In case the API doesn't provide an image, fallback to a placeholder
-            imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop'
+            imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop',
+            streamUrl: c.hlsUrl ?? c.HlsUrl ?? c.streamUrl ?? c.StreamUrl ?? c.videoUrl ?? c.VideoUrl ?? c.imgUrl ?? c.ImgUrl
           }));
           setCameras(mappedCameras);
           // Update cache
@@ -126,7 +129,7 @@ export default function Cameras() {
                 onClick={() => setExpandedCam(cam)}
               >
                 <div className="w-full h-48 bg-zinc-900 flex justify-center items-center relative overflow-hidden">
-                  <img src={cam.imgUrl} alt={cam.name} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700" />
+                  <HLSPlayer url={cam.streamUrl || cam.imgUrl} className="w-full h-full opacity-80 group-hover:opacity-100 group-hover:scale-105 transition-all duration-700 pointer-events-none" />
                   
                   <div className="absolute top-0 left-0 w-full p-4 bg-gradient-to-b from-black/80 to-transparent flex justify-between items-start z-10 h-24">
                     <span className="font-black text-white drop-shadow-md tracking-tight">{cam.name}</span>
@@ -178,7 +181,7 @@ export default function Cameras() {
                </button>
             </div>
             <div className="flex-1 w-full h-full flex items-center justify-center p-4 pt-16">
-              <img src={expandedCam.imgUrl} alt={expandedCam.name} className="w-full h-auto max-h-full object-contain border border-zinc-900 shadow-2xl rounded-md" />
+              <HLSPlayer url={expandedCam.streamUrl || expandedCam.imgUrl} className="w-full h-auto max-h-full border border-zinc-900 shadow-2xl rounded-md" />
             </div>
           </motion.div>
         )}
