@@ -19,11 +19,13 @@ import { clearAllStores, clearStore, STORES } from './utils/db';
 
 import Logs from './views/Logs';
 import { useLogs } from './context/LogsContext';
+import { useData } from './context/DataContext';
 
 type AppState = 'splash' | 'login' | 'auth' | 'app';
 
 export default function App() {
   const { clearLogs } = useLogs();
+  const { refreshData } = useData();
   const [appState, setAppState] = useState<AppState>(() => {
     const token = localStorage.getItem('auth_token');
     if (!token) return 'splash';
@@ -390,11 +392,16 @@ export default function App() {
   const clearCachesForView = (view: ViewType) => {
     if (view === 'doors') {
       delete (window as any).__cachedDoors;
+      refreshData().catch(err => console.warn("Failed to refresh doors data:", err));
     } else if (view === 'actions') {
       delete (window as any).__cachedActions;
+      refreshData().catch(err => console.warn("Failed to refresh actions data:", err));
     } else if (view === 'cameras') {
       delete (window as any).__cachedCameras;
       clearStore(STORES.CAMERAS).catch(err => console.warn("Failed to clear cameras store on refresh:", err));
+      refreshData().catch(err => console.warn("Failed to refresh cameras data:", err));
+    } else if (view === 'dashboard') {
+      refreshData().catch(err => console.warn("Failed to refresh dashboard data:", err));
     } else if (view === 'chats') {
       delete (window as any).__cachedChats;
       clearStore(STORES.CHATS).catch(err => console.warn("Failed to clear chats store on refresh:", err));

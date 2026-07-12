@@ -4,49 +4,15 @@ import { motion, AnimatePresence } from 'motion/react';
 import { getAllActions, activateDeactivateAction } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 
-interface Step {
-  id?: number;
-  Id?: number;
-  stepId?: string;
-  StepId?: string;
-  stepName?: string;
-  StepName?: string;
-  stepDescription?: string;
-  StepDescription?: string;
-  stepActive?: boolean;
-  StepActive?: boolean;
-}
-
-interface ActionData {
-  id: number;
-  Id?: number;
-  actionId?: string;
-  ActionId?: string;
-  actionName?: string;
-  ActionName?: string;
-  actionDescription?: string;
-  ActionDescription?: string;
-  actionActive?: boolean;
-  ActionActive?: boolean;
-  getActionStepDtos?: Step[];
-  GetActionStepDtos?: Step[];
-}
+import { useData, ActionData } from '../context/DataContext';
 
 export default function Actions() {
-  const [actions, setActions] = useState<ActionData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { actions, setActions, loading, refreshData } = useData();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [expandedActionId, setExpandedActionId] = useState<number | null>(null);
   const [triggeredActions, setTriggeredActions] = useState<{ [id: number]: boolean }>({});
-
-  useEffect(() => {
-    if (actions.length > 0) {
-      (window as any).__cachedActions = actions;
-    }
-  }, [actions]);
   
   // Internal toasts for SignalR events
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'info' | 'success' | 'warn' }[]>([]);
@@ -59,44 +25,8 @@ export default function Actions() {
     }, 4000);
   };
 
-  const fetchActions = async (showLoading = true) => {
-    if (showLoading) setLoading(true);
-    try {
-      const response = await getAllActions();
-      // Handle various response wrappers
-      const dataArray = response?.data ?? response?.Data ?? response?.result ?? response?.Result ?? response;
-      if (Array.isArray(dataArray)) {
-        setActions(dataArray);
-        setError(null);
-      } else if (response && typeof response === 'object') {
-        // If it's single object or has another format
-        const possibleArray = Object.values(response).find(val => Array.isArray(val));
-        if (possibleArray) {
-          setActions(possibleArray as ActionData[]);
-          setError(null);
-        } else {
-          setActions([]);
-        }
-      } else {
-        setActions([]);
-      }
-    } catch (err: any) {
-      console.error('Failed to load actions:', err);
-      setError('Could not retrieve security actions');
-    } finally {
-      if (showLoading) setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    if (Array.isArray((window as any).__cachedActions) && (window as any).__cachedActions.length > 0) {
-      setActions((window as any).__cachedActions);
-      setLoading(false);
-    } else {
-      fetchActions();
-    }
-
-    // SignalR listeners
+    // Local SignalR listeners only for temporary UI visual feedback (toasts, highlights)
     const handleActionTriggered = (data: any) => {
       const actId = Number(data?.actionId ?? data?.ActionId);
       const name = data?.actionName ?? data?.ActionName ?? `Action #${actId}`;
@@ -115,41 +45,22 @@ export default function Actions() {
     const handleActionCreated = (data: any) => {
       const name = data?.actionName ?? data?.ActionName ?? 'New Action';
       addToast(`New Action "${name}" created.`, 'info');
-      fetchActions(false);
     };
 
     const handleActionUpdated = (data: any) => {
       const name = data?.actionName ?? data?.ActionName ?? 'Action';
       addToast(`Action "${name}" details updated.`, 'info');
-      fetchActions(false);
     };
 
     const handleActionActivationChanged = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
       const name = data?.actionName ?? data?.ActionName ?? 'Action';
       const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
-      
       addToast(`Action "${name}" is now ${isActive ? 'Active' : 'Inactive'}.`, 'info');
-      
-      setActions(prev => prev.map(act => {
-        const currentId = act.id ?? act.Id;
-        if (Number(currentId) === actId) {
-          return {
-            ...act,
-            actionActive: isActive,
-            ActionActive: isActive
-          };
-        }
-        return act;
-      }));
     };
 
     const handleActionDeleted = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
       const name = data?.actionName ?? data?.ActionName ?? 'Action';
       addToast(`Action "${name}" deleted.`, 'warn');
-      
-      setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
     };
 
     // Register listeners with homeSecurityHubConnection proxy
@@ -286,20 +197,6 @@ export default function Actions() {
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <LoaderCircle size={36} className="animate-spin text-indigo-600" />
             <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Loading security macros...</p>
-          </div>
-        ) : error ? (
-          <div className="flex flex-col items-center justify-center py-14 bg-rose-50 rounded-2xl border border-rose-100 gap-3 px-4 text-center">
-            <AlertCircle size={36} className="text-rose-500" />
-            <div>
-              <p className="text-sm font-black text-rose-900">Failed to load actions</p>
-              <p className="text-xs text-rose-600 mt-1">{error}</p>
-            </div>
-            <button 
-              onClick={() => fetchActions()}
-              className="text-xs font-extrabold text-white bg-rose-600 px-4 py-2 rounded-xl hover:bg-rose-700 transition-colors"
-            >
-              Try Again
-            </button>
           </div>
         ) : filteredActions.length > 0 ? (
           <div className="flex flex-col gap-3.5">

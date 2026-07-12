@@ -1,105 +1,29 @@
 import { useState, useEffect } from 'react';
-import { Maximize2, X, AlertCircle, Video, Search } from 'lucide-react';
+import { Maximize2, X, AlertCircle, Video, Search, LoaderCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { getAllCameras } from '../utils/api';
-import { homeSecurityHubConnection } from '../utils/signalr';
-import { saveData, getAllData, STORES } from '../utils/db';
 import HLSPlayer from '../components/HLSPlayer';
-
-type CameraData = {
-  id: string;
-  name: string;
-  imgUrl: string;
-  streamUrl?: string;
-};
+import { useData, CameraData } from '../context/DataContext';
 
 export default function Cameras() {
-  const [cameras, setCameras] = useState<CameraData[]>([]);
+  const { cameras, loading } = useData();
   const [expandedCam, setExpandedCam] = useState<CameraData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Auto close expanded camera if it gets deleted
   useEffect(() => {
-    if (cameras.length > 0) {
-      (window as any).__cachedCameras = cameras;
+    if (expandedCam && !cameras.some(c => String(c.id) === String(expandedCam.id))) {
+      setExpandedCam(null);
     }
-  }, [cameras]);
+  }, [cameras, expandedCam]);
 
-  useEffect(() => {
-    const loadInitial = async () => {
-      if (Array.isArray((window as any).__cachedCameras) && (window as any).__cachedCameras.length > 0) {
-        setCameras((window as any).__cachedCameras);
-        return;
-      }
-      try {
-        const cached = await getAllData(STORES.CAMERAS);
-        if (Array.isArray(cached) && cached.length > 0) {
-          setCameras(cached as CameraData[]);
-          (window as any).__cachedCameras = cached;
-          return;
-        }
-      } catch (err) {
-        console.warn("Camera cache load failed:", err);
-      }
-      fetchCameras();
-    };
-
-    const fetchCameras = async () => {
-      try {
-        const response = await getAllCameras();
-        if (response.status && response.data) {
-          const mappedCameras = response.data.map((c: any, index: number) => ({
-            id: String(c.id ?? c.Id ?? index),
-            name: c.name ?? c.Name ?? `Camera ${c.id ?? c.Id ?? index}`,
-            // In case the API doesn't provide an image, fallback to a placeholder
-            imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop',
-            streamUrl: c.hlsUrl ?? c.HlsUrl ?? c.streamUrl ?? c.StreamUrl ?? c.videoUrl ?? c.VideoUrl ?? c.imgUrl ?? c.ImgUrl
-          }));
-          setCameras(mappedCameras);
-          // Update cache
-          Promise.all(mappedCameras.map((cam: CameraData) => saveData(STORES.CAMERAS, cam))).catch(e => console.warn('Cam cache save failed:', e));
-        }
-      } catch (err) {
-        console.error("Failed to fetch cameras", err);
-      }
-    };
-    
-    loadInitial();
-
-    const handleCameraCreated = (data: any) => {
-       setCameras(prev => {
-          const newCam = {
-            id: String(data.id ?? data.Id),
-            name: data.cameraName ?? data.CameraName,
-            imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop'
-          };
-          if (prev.find(c => c.id === newCam.id)) return prev;
-          return [newCam, ...prev];
-       });
-    };
-
-    const handleCameraUpdated = (data: any) => {
-       setCameras(prev => prev.map(c => String(c.id) === String(data.id ?? data.Id) ? {
-          ...c,
-          name: data.cameraName ?? data.CameraName ?? c.name,
-          imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? c.imgUrl
-       } : c));
-    };
-
-    const handleCameraDeleted = (data: any) => {
-       setCameras(prev => prev.filter(c => String(c.id) !== String(data.id ?? data.Id)));
-       setExpandedCam(prev => String(prev?.id) === String(data.id ?? data.Id) ? null : prev);
-    };
-
-    homeSecurityHubConnection.on("CameraCreated", handleCameraCreated);
-    homeSecurityHubConnection.on("CameraUpdated", handleCameraUpdated);
-    homeSecurityHubConnection.on("CameraDeleted", handleCameraDeleted);
-
-    return () => {
-       homeSecurityHubConnection.off("CameraCreated", handleCameraCreated);
-       homeSecurityHubConnection.off("CameraUpdated", handleCameraUpdated);
-       homeSecurityHubConnection.off("CameraDeleted", handleCameraDeleted);
-    };
-  }, []);
+  if (loading) {
+    return (
+      <div className="p-5 flex flex-col gap-3 min-h-[400px] justify-center items-center">
+        <LoaderCircle size={36} className="animate-spin text-purple-500" />
+        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-2">Loading Cameras...</p>
+      </div>
+    );
+  }
 
   return (
     <>

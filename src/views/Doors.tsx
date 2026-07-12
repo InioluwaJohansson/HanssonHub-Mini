@@ -1,143 +1,12 @@
-import { useState, useEffect } from 'react';
-import { DoorOpen, DoorClosed, Lock, Unlock, Search } from 'lucide-react';
+import { useState } from 'react';
+import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle } from 'lucide-react';
 import { motion } from 'motion/react';
-import { getAllDoorsByDoorType, lockDoor, unlockDoor, updateDoor } from '../utils/api';
-import { homeSecurityHubConnection } from '../utils/signalr';
-
-type DoorData = {
-  id: string;
-  doorId?: string;
-  name: string;
-  isLocked: boolean;
-  isOpen: boolean;
-  doorType?: any;
-  type?: string;
-};
-
-const getDoorTypeString = (doorType: any) => {
-  if (doorType === undefined || doorType === null) return "Main Door";
-  const dt = String(doorType).trim();
-  if (dt === "3" || dt.toLowerCase() === "maindoor" || dt.toLowerCase() === "main door") return "Main Door";
-  if (dt === "2" || dt.toLowerCase() === "garagedoor" || dt.toLowerCase() === "garage door") return "Garage Door";
-  if (dt === "1" || dt.toLowerCase() === "backdoor" || dt.toLowerCase() === "back door") return "Back Door";
-  if (dt === "4" || dt.toLowerCase() === "gate") return "Gate";
-  return `Type ${dt}`;
-};
+import { lockDoor, unlockDoor } from '../utils/api';
+import { useData } from '../context/DataContext';
 
 export default function Doors() {
-  const [doors, setDoors] = useState<DoorData[]>([]);
+  const { doors, loading } = useData();
   const [searchQuery, setSearchQuery] = useState('');
-
-  useEffect(() => {
-    if (doors.length > 0) {
-      (window as any).__cachedDoors = doors;
-    }
-  }, [doors]);
-
-  useEffect(() => {
-    const fetchDoors = async () => {
-      try {
-        const response = await getAllDoorsByDoorType(3);
-        if (response.status && response.data) {
-          const mappedDoors = response.data.map((d: any, index: number) => ({
-            id: String(d.id ?? d.Id ?? index),
-            doorId: String(d.doorId ?? d.DoorId ?? ''),
-            name: d.doorName ?? d.DoorName ?? d.name ?? d.Name ?? `Door ${d.id ?? d.Id ?? index}`,
-            isLocked: d.isLocked ?? d.IsLocked ?? true,
-            isOpen: d.isOpen ?? d.IsOpen ?? false,
-            doorType: d.doorType ?? d.DoorType,
-            type: d.type ?? d.Type ?? getDoorTypeString(d.doorType ?? d.DoorType)
-          }));
-          setDoors(mappedDoors);
-        }
-      } catch (err) {
-        console.error("Failed to fetch doors", err);
-      }
-    };
-
-    if (Array.isArray((window as any).__cachedDoors) && (window as any).__cachedDoors.length > 0) {
-      setDoors((window as any).__cachedDoors);
-    } else {
-      fetchDoors();
-    }
-
-    const handleDoorCreated = (data: any) => {
-       setDoors(prev => {
-          const doorIdVal = String(data.doorId ?? data.DoorId ?? '');
-          const idVal = String(data.id ?? data.Id);
-          const nameVal = data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? `Door ${idVal}`;
-          const isLockedVal = data.isLocked ?? data.IsLocked ?? true;
-          const isOpenVal = data.isOpen ?? data.IsOpen ?? false;
-          const dtVal = data.doorType ?? data.DoorType;
-          
-          const newDoor: DoorData = { 
-             id: idVal, 
-             doorId: doorIdVal,
-             name: nameVal, 
-             isLocked: isLockedVal, 
-             isOpen: isOpenVal,
-             doorType: dtVal,
-             type: data.type ?? data.Type ?? getDoorTypeString(dtVal)
-          };
-          if (prev.find(d => d.id === newDoor.id || (d.doorId && d.doorId === newDoor.id))) return prev;
-          return [newDoor, ...prev];
-       });
-    };
-
-    const handleDoorUpdated = (data: any) => {
-       setDoors(prev => prev.map(d => {
-         const targetId = String(data.id ?? data.Id);
-         if (String(d.id) === targetId || (d.doorId && String(d.doorId) === targetId)) {
-           const dtVal = data.doorType ?? data.DoorType ?? d.doorType;
-           return { 
-              ...d, 
-              name: data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? d.name, 
-              isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked, 
-              isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen,
-              doorType: dtVal,
-              type: data.type ?? data.Type ?? getDoorTypeString(dtVal)
-           };
-         }
-         return d;
-       }));
-    };
-
-    const handleDoorTriggered = (data: any) => {
-       const triggeredId = String(data.id ?? data.Id);
-       setDoors(prev => prev.map(d => {
-         if (String(d.id) === triggeredId || (d.doorId && String(d.doorId) === triggeredId)) {
-           return {
-             ...d,
-             isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked,
-             isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen
-           };
-         }
-         return d;
-       }));
-    };
-
-    const handleDoorDeleted = (data: any) => {
-       const deletedId = String(data.id ?? data.Id);
-       const deletedDoorId = String(data.doorId ?? data.DoorId ?? '');
-       setDoors(prev => prev.filter(d => 
-         String(d.id) !== deletedId && 
-         (!d.doorId || String(d.doorId) !== deletedId) &&
-         (!deletedDoorId || (String(d.id) !== deletedDoorId && String(d.doorId) !== deletedDoorId))
-       ));
-    };
-
-    homeSecurityHubConnection.on("DoorCreated", handleDoorCreated);
-    homeSecurityHubConnection.on("DoorUpdated", handleDoorUpdated);
-    homeSecurityHubConnection.on("DoorTriggered", handleDoorTriggered);
-    homeSecurityHubConnection.on("DoorDeleted", handleDoorDeleted);
-
-    return () => {
-       homeSecurityHubConnection.off("DoorCreated", handleDoorCreated);
-       homeSecurityHubConnection.off("DoorUpdated", handleDoorUpdated);
-       homeSecurityHubConnection.off("DoorTriggered", handleDoorTriggered);
-       homeSecurityHubConnection.off("DoorDeleted", handleDoorDeleted);
-    };
-  }, []);
 
   const toggleLock = async (id: string) => {
     try {
@@ -154,6 +23,15 @@ export default function Doors() {
       console.error("Failed to toggle open/close for door", id, err);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="p-5 flex flex-col gap-3 min-h-[400px] justify-center items-center">
+        <LoaderCircle size={36} className="animate-spin text-amber-500" />
+        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-2">Loading Doors...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="p-5 flex flex-col gap-3">

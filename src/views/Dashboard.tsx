@@ -1,16 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Camera, ShieldCheck, ShieldAlert, FileText, LayoutDashboard, DoorClosed, Play, Pause, LoaderCircle } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
+import { useData } from '../context/DataContext';
 import { motion } from 'motion/react';
-import { getImageUrl, getAllDoors, getAllCameras, getAllActions, activateDeactivateAction } from '../utils/api';
-import { homeSecurityHubConnection } from '../utils/signalr';
+import { getImageUrl, activateDeactivateAction } from '../utils/api';
 
 export default function Dashboard() {
   const { logs, fetchLogs } = useLogs();
-  const [doors, setDoors] = useState<any[]>([]);
-  const [cameras, setCameras] = useState<any[]>([]);
-  const [actions, setActions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { doors, cameras, actions, loading, setActions } = useData();
   const [togglingActionId, setTogglingActionId] = useState<number | null>(null);
   
   useEffect(() => {
@@ -18,175 +15,6 @@ export default function Dashboard() {
       fetchLogs();
     }
   }, [logs.length, fetchLogs]);
-
-  // Load initial stats
-  useEffect(() => {
-    let active = true;
-
-    const loadData = async () => {
-      try {
-        const [doorsRes, camerasRes, actionsRes] = await Promise.all([
-          getAllDoors(),
-          getAllCameras(),
-          getAllActions()
-        ]);
-
-        if (active) {
-          // Parse Doors
-          const doorsData = doorsRes?.data ?? doorsRes?.Data ?? doorsRes ?? [];
-          setDoors(doorsData.map((d: any, index: number) => ({
-            id: String(d.id ?? d.Id ?? index),
-            isLocked: d.isLocked ?? d.IsLocked ?? true,
-            isOpen: d.isOpen ?? d.IsOpen ?? false,
-            name: d.doorName ?? d.DoorName ?? d.name ?? d.Name ?? `Door ${d.id ?? d.Id ?? index}`,
-            doorType: d.doorType ?? d.DoorType
-          })));
-
-          // Parse Cameras
-          const camerasData = camerasRes?.data ?? camerasRes?.Data ?? camerasRes ?? [];
-          setCameras(camerasData);
-
-          // Parse Actions
-          const actionsData = actionsRes?.data ?? actionsRes?.Data ?? actionsRes?.result ?? actionsRes?.Result ?? actionsRes ?? [];
-          setActions(actionsData);
-        }
-      } catch (err) {
-        console.error("Dashboard failed to load initial data:", err);
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
-    loadData();
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Listen to SignalR events for real-time status updates
-  useEffect(() => {
-    const handleDoorCreated = (data: any) => {
-      setDoors(prev => {
-        const idVal = String(data.id ?? data.Id);
-        if (prev.some(d => d.id === idVal)) return prev;
-        return [...prev, {
-          id: idVal,
-          isLocked: data.isLocked ?? data.IsLocked ?? true,
-          isOpen: data.isOpen ?? data.IsOpen ?? false,
-          name: data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? `Door ${idVal}`,
-          doorType: data.doorType ?? data.DoorType
-        }];
-      });
-    };
-
-    const handleDoorUpdated = (data: any) => {
-      setDoors(prev => prev.map(d => {
-        const targetId = String(data.id ?? data.Id);
-        if (d.id === targetId) {
-          return {
-            ...d,
-            name: data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? d.name,
-            isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked,
-            isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen,
-            doorType: data.doorType ?? data.DoorType ?? d.doorType
-          };
-        }
-        return d;
-      }));
-    };
-
-    const handleDoorTriggered = (data: any) => {
-      const triggeredId = String(data.id ?? data.Id);
-      setDoors(prev => prev.map(d => {
-        if (d.id === triggeredId) {
-          return {
-            ...d,
-            isLocked: data.isLocked ?? data.IsLocked ?? d.isLocked,
-            isOpen: data.isOpen ?? data.IsOpen ?? d.isOpen
-          };
-        }
-        return d;
-      }));
-    };
-
-    const handleDoorDeleted = (data: any) => {
-      const deletedId = String(data.id ?? data.Id);
-      setDoors(prev => prev.filter(d => d.id !== deletedId));
-    };
-
-    const handleCameraCreated = (data: any) => {
-      setCameras(prev => {
-        const idVal = String(data.id ?? data.Id);
-        if (prev.some(c => String(c.id ?? c.Id) === idVal)) return prev;
-        return [...prev, data];
-      });
-    };
-
-    const handleCameraDeleted = (data: any) => {
-      const deletedId = String(data.id ?? data.Id);
-      setCameras(prev => prev.filter(c => String(c.id ?? c.Id) !== deletedId));
-    };
-
-    const handleActionCreated = () => {
-      getAllActions().then(res => {
-        const data = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
-        setActions(data);
-      });
-    };
-    
-    const handleActionUpdated = () => {
-      getAllActions().then(res => {
-        const data = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
-        setActions(data);
-      });
-    };
-
-    const handleActionActivationChanged = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
-      setActions(prev => prev.map(act => {
-        const currId = act.id ?? act.Id;
-        if (Number(currId) === actId) {
-          return {
-            ...act,
-            actionActive: isActive,
-            ActionActive: isActive
-          };
-        }
-        return act;
-      }));
-    };
-
-    const handleActionDeleted = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
-    };
-
-    homeSecurityHubConnection.on("DoorCreated", handleDoorCreated);
-    homeSecurityHubConnection.on("DoorUpdated", handleDoorUpdated);
-    homeSecurityHubConnection.on("DoorTriggered", handleDoorTriggered);
-    homeSecurityHubConnection.on("DoorDeleted", handleDoorDeleted);
-    homeSecurityHubConnection.on("CameraCreated", handleCameraCreated);
-    homeSecurityHubConnection.on("CameraDeleted", handleCameraDeleted);
-    homeSecurityHubConnection.on('ActionCreated', handleActionCreated);
-    homeSecurityHubConnection.on('ActionUpdated', handleActionUpdated);
-    homeSecurityHubConnection.on('ActionActivationChanged', handleActionActivationChanged);
-    homeSecurityHubConnection.on('ActionDeleted', handleActionDeleted);
-
-    return () => {
-      homeSecurityHubConnection.off("DoorCreated", handleDoorCreated);
-      homeSecurityHubConnection.off("DoorUpdated", handleDoorUpdated);
-      homeSecurityHubConnection.off("DoorTriggered", handleDoorTriggered);
-      homeSecurityHubConnection.off("DoorDeleted", handleDoorDeleted);
-      homeSecurityHubConnection.off("CameraCreated", handleCameraCreated);
-      homeSecurityHubConnection.off("CameraDeleted", handleCameraDeleted);
-      homeSecurityHubConnection.off('ActionCreated', handleActionCreated);
-      homeSecurityHubConnection.off('ActionUpdated', handleActionUpdated);
-      homeSecurityHubConnection.off('ActionActivationChanged', handleActionActivationChanged);
-      homeSecurityHubConnection.off('ActionDeleted', handleActionDeleted);
-    };
-  }, []);
 
   const handleToggleAction = async (actionId: number) => {
     if (togglingActionId !== null) return;
