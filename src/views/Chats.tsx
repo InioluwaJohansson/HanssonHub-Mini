@@ -4,7 +4,8 @@ import {
   Play, Pause, Square, Users, MessageSquarePlus, CheckCheck, UserPlus, 
   CirclePlus, LoaderCircle, Trash2, Edit2, Info, Plus, UserMinus,
   Reply, Forward, Copy, Check, Lock, Calendar, AlertCircle, Repeat,
-  FileText, Download, Image, ChevronDown, Clock
+  FileText, Download, Image, ChevronDown, Clock,
+  Phone, Video, PhoneOff, MicOff, VideoOff, Camera, ArrowDownLeft, ArrowUpRight, Volume2, VolumeX, PhoneCall, Monitor
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -12,12 +13,16 @@ import {
   removeParticipant, addParticipants, sendMessage, editMessage, 
   getChatMessages, deleteMessage, getUnreadCount, getUserDetails,
   getStoredAppNamesList, updateGroupChat, deleteChat,
-  sendTypingStatus, joinChatRoom, getBaseUrl, getImageUrl
+  sendTypingStatus, joinChatRoom, getBaseUrl, getImageUrl,
+  startCall, endCall, getCallLogs, acceptCall, rejectCall
 } from '../utils/api';
 import { MessageType } from '../types/chat';
 import { saveData, getData, getAllData, STORES, clearStore } from '../utils/db';
 import { homeSecurityHubConnection, startHomeSecurityHub } from '../utils/signalr';
-import { playNotificationSound, pauseAllAudio, setCurrentlyPlaying } from '../utils/audio';
+import { 
+  playNotificationSound, pauseAllAudio, setCurrentlyPlaying,
+  startRinging, stopRinging, playCallConnectSound, playCallDisconnectSound
+} from '../utils/audio';
 import Cropper from 'react-easy-crop';
 
 // Helper to trigger haptic feedback
@@ -269,6 +274,22 @@ const getDescriptiveLastMessage = (msg: any): string => {
     return `📎 ${fileCount} file${fileCount > 1 ? 's' : ''}`;
   }
   return `📎 ${total} files`;
+};
+
+const formatLastMessageTime = (dateInput?: string | Date | number, fallbackTime?: string): string => {
+  if (!dateInput) return fallbackTime || "Just now";
+  const date = new Date(dateInput);
+  if (isNaN(date.getTime())) return fallbackTime || "Just now";
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const hours24 = 24 * 60 * 60 * 1000;
+
+  if (diffMs > hours24) {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  } else {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 };
 
 function AudioAttachmentPlayer({ mediaUrl, fileName, fileSize, isMe = false }: { mediaUrl?: string; fileName?: string; fileSize?: number; isMe?: boolean }) {
@@ -671,7 +692,17 @@ type ChatRoom = {
   lastMessageSentAt?: string;
 };
 
-export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (isActive: boolean) => void, onRefreshPage?: () => void }) {
+export default function Chats({ 
+  onChatActive, 
+  onRefreshPage, 
+  isViewActive = true, 
+  onNavigateToChats 
+}: { 
+  onChatActive: (isActive: boolean) => void; 
+  onRefreshPage?: () => void; 
+  isViewActive?: boolean; 
+  onNavigateToChats?: () => void; 
+}) {
   const [localChatList, setLocalChatList] = useState<ChatRoom[]>([]);
   useEffect(() => {
     if (localChatList.length > 0) {
@@ -706,6 +737,1125 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // User context
   const [currentUserId, setCurrentUserId] = useState<number>(0);
   const [onlineUsers, setOnlineUsers] = useState<Set<number>>(new Set());
+
+  // Call States
+  const [activeCall, _setActiveCall] = useState<any | null>(null);
+  const [incomingCall, _setIncomingCall] = useState<any | null>(null);
+
+  const enrichCallDto = (dto: any) => {
+    if (!dto) return dto;
+    const cid = dto.chatId || dto.ChatId;
+    let isGroup = dto.isGroup || dto.IsGroup || false;
+    let groupName = dto.chatName || dto.ChatName || dto.groupName || dto.GroupName;
+    let imageUrl = dto.imageUrl || dto.ImageUrl;
+
+    const foundChat = cid ? localChatList.find(c => String(c.id) === String(cid)) : null;
+    if (foundChat) {
+      isGroup = isGroup || foundChat.isGroup || foundChat.IsGroup || false;
+      if (!groupName) {
+        groupName = foundChat.name || foundChat.Name;
+      }
+      if (!imageUrl) {
+        imageUrl = foundChat.imageUrl || foundChat.ImageUrl;
+      }
+    }
+
+    // Also infer group call if participants count (excluding ourselves or total) > 2
+    let incomingParticipants = dto.participants || dto.Participants || [];
+    if (incomingParticipants.length > 2) {
+      isGroup = true;
+    }
+
+    // If it's a group call, ensure ALL group chat participants are present in the call participants list
+    let finalParticipants = [...incomingParticipants];
+    
+    if (isGroup && foundChat) {
+      const chatParticipants = foundChat.participants || foundChat.Participants || [];
+      chatParticipants.forEach((cp: any) => {
+        const cpId = Number(cp.personId || cp.PersonId || cp.id || cp.Id);
+        // Check if this chat participant is already in finalParticipants
+        const exists = finalParticipants.some((p: any) => {
+          const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+          return pId === cpId;
+        });
+        
+        if (!exists) {
+          // Add them as a ringing participant
+          finalParticipants.push({
+            personId: cpId,
+            PersonId: cpId,
+            status: 0, // Ringing
+            Status: 0,
+            isMuted: false,
+            IsMuted: false,
+            isCameraEnabled: true,
+            IsCameraEnabled: true
+          });
+        }
+      });
+    }
+
+    // Normalize each participant's properties for robust rendering
+    finalParticipants = finalParticipants.map((p: any) => {
+      const pId = p.personId || p.PersonId || p.id || p.Id;
+      const status = p.status !== undefined ? p.status : (p.Status !== undefined ? p.Status : 0);
+      return {
+        ...p,
+        personId: pId,
+        PersonId: pId,
+        id: pId,
+        Id: pId,
+        status,
+        Status: status,
+      };
+    });
+
+    return {
+      ...dto,
+      isGroup,
+      IsGroup: isGroup,
+      chatName: groupName,
+      ChatName: groupName,
+      groupName,
+      GroupName: groupName,
+      imageUrl,
+      ImageUrl: imageUrl,
+      participants: finalParticipants,
+      Participants: finalParticipants
+    };
+  };
+
+  const setActiveCall = (val: any) => {
+    if (typeof val === 'function') {
+      _setActiveCall((prev: any) => {
+        const res = val(prev);
+        return enrichCallDto(res);
+      });
+    } else {
+      _setActiveCall(enrichCallDto(val));
+    }
+  };
+
+  const setIncomingCall = (val: any) => {
+    if (typeof val === 'function') {
+      _setIncomingCall((prev: any) => {
+        const res = val(prev);
+        return enrichCallDto(res);
+      });
+    } else {
+      _setIncomingCall(enrichCallDto(val));
+    }
+  };
+  const [callState, setCallState] = useState<'idle' | 'ringing_outgoing' | 'ringing_incoming' | 'connected' | 'disconnected'>('idle');
+  const [isMuted, setIsMuted] = useState(false);
+  const [isSpeakerMuted, setIsSpeakerMuted] = useState(false);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<{ [personId: number]: MediaStream }>({});
+  const [callDuration, setCallDuration] = useState(0);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'chats' | 'calls'>('chats');
+  const [callLogs, setCallLogs] = useState<any[]>([]);
+  const [isCallLogsLoading, setIsCallLogsLoading] = useState(false);
+  const [callLogsPage, setCallLogsPage] = useState<number>(1);
+  const [hasMoreCallLogs, setHasMoreCallLogs] = useState<boolean>(true);
+  const [isCallLogsFetchingMore, setIsCallLogsFetchingMore] = useState<boolean>(false);
+  const [audioAnalyserData, setAudioAnalyserData] = useState<number[]>(new Array(10).fill(20));
+  const [remoteAudioLevels, setRemoteAudioLevels] = useState<{[personId: number]: number[]}>({});
+  const [isCallMinimized, setIsCallMinimized] = useState(false);
+  const [showCameraPermissionModal, setShowCameraPermissionModal] = useState(false);
+  const [pendingCallType, setPendingCallType] = useState<number | null>(null);
+
+  const peerConnectionsRef = useRef<{ [personId: number]: RTCPeerConnection }>({});
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRefs = useRef<{ [personId: number]: HTMLVideoElement | null }>({});
+  const callTimerRef = useRef<any>(null);
+  const analyserIntervalRef = useRef<any>(null);
+
+  const formatCallDuration = (sec: number | string | any) => {
+    if (sec === undefined || sec === null) return '00:00';
+    let totalSecs = 0;
+
+    if (typeof sec === 'number') {
+      totalSecs = Math.floor(sec);
+    } else if (typeof sec === 'string') {
+      const trimmed = sec.trim();
+      if (trimmed.includes(':')) {
+        const parts = trimmed.split(':').map(val => parseInt(val, 10) || 0);
+        if (parts.length === 3) {
+          totalSecs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        } else if (parts.length === 2) {
+          totalSecs = parts[0] * 60 + parts[1];
+        }
+      } else if (/[hmshms]/.test(trimmed)) {
+        const matches = trimmed.match(/(\d+(?:\.\d+)?)\s*([hms])/g);
+        if (matches) {
+          matches.forEach(m => {
+            const numPart = m.match(/(\d+(?:\.\d+)?)/);
+            const unitPart = m.match(/([hms])/);
+            if (numPart && unitPart) {
+              const val = Math.floor(Number(numPart[0]));
+              const unit = unitPart[0];
+              if (unit === 'h') totalSecs += val * 3600;
+              if (unit === 'm') totalSecs += val * 60;
+              if (unit === 's') totalSecs += val;
+            }
+          });
+        }
+      } else {
+        totalSecs = Math.floor(Number(trimmed)) || 0;
+      }
+    }
+
+    if (isNaN(totalSecs) || totalSecs < 0) totalSecs = 0;
+    const hrs = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+
+    const pad = (num: number) => String(num).padStart(2, '0');
+
+    if (hrs > 0) {
+      return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+    }
+    return `${pad(mins)}:${pad(secs)}`;
+  };
+
+  const parseDate = (val: any): Date | null => {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    if (typeof val === 'number') {
+      const ms = val < 10000000000 ? val * 1000 : val;
+      const d = new Date(ms);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (!trimmed || trimmed === 'Invalid Date' || trimmed === 'null' || trimmed === 'undefined') return null;
+      const aspNetMatch = trimmed.match(/\/Date\((\d+)\)\//);
+      if (aspNetMatch) {
+        const ms = parseInt(aspNetMatch[1], 10);
+        const d = new Date(ms);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      if (/^\d+$/.test(trimmed)) {
+        const num = parseInt(trimmed, 10);
+        const ms = num < 10000000000 ? num * 1000 : num;
+        const d = new Date(ms);
+        return isNaN(d.getTime()) ? null : d;
+      }
+      const d = new Date(trimmed);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    return null;
+  };
+
+  const formatLogDate = (dateVal: any): string => {
+    const d = parseDate(dateVal);
+    if (!d) return '';
+    return d.toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const normalizeCallLogItem = (callDto: any, fallbackActiveCall?: any) => {
+    if (!callDto && !fallbackActiveCall) return null;
+
+    const callId = callDto?.id || callDto?.Id || callDto?.callId || callDto?.CallId || fallbackActiveCall?.id || fallbackActiveCall?.Id || fallbackActiveCall?.callId || fallbackActiveCall?.CallId;
+    if (!callId) return null;
+    const numericCallId = Number(callId);
+
+    const activeObj = (activeCallRef.current && Number(activeCallRef.current.id || activeCallRef.current.Id || activeCallRef.current.callId || activeCallRef.current.CallId) === numericCallId)
+      ? activeCallRef.current
+      : fallbackActiveCall;
+
+    const currentUserId = Number(currentUserIdRef.current);
+    const chatId = callDto?.chatId || callDto?.ChatId || activeObj?.chatId || activeObj?.ChatId;
+    const callerId = callDto?.callerPersonId || callDto?.CallerPersonId || activeObj?.callerPersonId || activeObj?.CallerPersonId;
+
+    let matchingChat = chatId ? localChatListRef.current.find(c => String(c.id) === String(chatId)) : null;
+    if (!matchingChat && callerId) {
+      matchingChat = localChatListRef.current.find(c => Number(c.personId || c.PartnerId || c.partnerId) === Number(callerId));
+    }
+
+    const incomingParticipants = (callDto?.participants && callDto.participants.length > 0)
+      ? callDto.participants
+      : ((callDto?.Participants && callDto.Participants.length > 0)
+        ? callDto.Participants
+        : (activeObj?.participants || activeObj?.Participants || []));
+
+    let partnerId = (callerId && Number(callerId) !== currentUserId) ? Number(callerId) : null;
+    if (!partnerId && incomingParticipants.length > 0) {
+      const otherP = incomingParticipants.find((p: any) => Number(p.personId || p.PersonId || p.id || p.Id) !== currentUserId);
+      if (otherP) {
+        partnerId = Number(otherP.personId || otherP.PersonId || otherP.id || otherP.Id);
+      }
+    }
+    if (!partnerId && matchingChat) {
+      const otherPart = matchingChat.participants?.find((p: any) => Number(p.personId || p.PersonId || p.id || p.Id) !== currentUserId);
+      if (otherPart) {
+        partnerId = Number(otherPart.personId || otherPart.PersonId || otherPart.id || otherPart.Id);
+      }
+    }
+
+    const partnerPerson = partnerId ? availablePersonsRef.current.find(p => Number(p.id || p.Id) === partnerId) : null;
+
+    let chatName = callDto?.chatName || callDto?.ChatName || callDto?.groupName || callDto?.GroupName || callDto?.name || callDto?.Name || activeObj?.chatName || activeObj?.ChatName || activeObj?.groupName || activeObj?.GroupName || matchingChat?.name || matchingChat?.Name;
+    if (!chatName || chatName === 'Secure Call') {
+      if (partnerPerson?.name || partnerPerson?.Name) {
+        chatName = partnerPerson.name || partnerPerson.Name;
+      } else if (matchingChat?.name || matchingChat?.Name) {
+        chatName = matchingChat.name || matchingChat.Name;
+      } else {
+        chatName = partnerId ? `User ${partnerId}` : 'Secure Call';
+      }
+    }
+
+    let imageUrl = callDto?.imageUrl || callDto?.ImageUrl || callDto?.chatImage || callDto?.ChatImage || callDto?.image || callDto?.Image || activeObj?.imageUrl || activeObj?.ImageUrl || matchingChat?.imageUrl || matchingChat?.ImageUrl || partnerPerson?.imageUrl || partnerPerson?.ImageUrl || partnerPerson?.picture || partnerPerson?.Picture || '';
+
+    const rawStatus = callDto?.status !== undefined ? callDto.status : (callDto?.Status !== undefined ? callDto.Status : (callDto?.callStatus !== undefined ? callDto.callStatus : (callDto?.CallStatus !== undefined ? callDto.CallStatus : activeObj?.status)));
+    let mappedStatus = rawStatus;
+    if (mappedStatus === 'Initiated' || mappedStatus === 'Ringing') mappedStatus = 0;
+    else if (mappedStatus === 'Connected' || mappedStatus === 'Active') mappedStatus = 2;
+    else if (mappedStatus === 'Ended') mappedStatus = 3;
+    else if (mappedStatus === 'Missed') mappedStatus = 4;
+    else if (mappedStatus === 'Rejected') mappedStatus = 5;
+
+    let isMissed = callDto?.isMissed !== undefined ? callDto.isMissed : (callDto?.IsMissed !== undefined ? callDto.IsMissed : activeObj?.isMissed);
+    if (isMissed === undefined) {
+      isMissed = (mappedStatus === 4 || mappedStatus === 5);
+    }
+
+    let isIncoming = callDto?.isIncoming !== undefined ? callDto.isIncoming : (callDto?.IsIncoming !== undefined ? callDto.IsIncoming : activeObj?.isIncoming);
+    if (isIncoming === undefined && callerId) {
+      isIncoming = Number(callerId) !== currentUserId;
+    }
+
+    const callType = callDto?.type !== undefined ? callDto.type : (callDto?.Type !== undefined ? callDto.Type : (activeObj?.type !== undefined ? activeObj.type : activeObj?.Type));
+
+    const rawStartedAt = callDto?.startedAt || callDto?.StartedAt || callDto?.createdTime || callDto?.CreatedTime || callDto?.createdAt || callDto?.CreatedAt || callDto?.timestamp || callDto?.Timestamp || callDto?.date || callDto?.Date || activeObj?.startedAt || activeObj?.StartedAt;
+    const parsedStartedDate = parseDate(rawStartedAt);
+    const validStartedAt = parsedStartedDate ? parsedStartedDate.toISOString() : (activeObj?.startedAt || new Date().toISOString());
+
+    const rawAnsweredAt = callDto?.answeredAt || callDto?.AnsweredAt || activeObj?.answeredAt || activeObj?.AnsweredAt;
+    const parsedAnsweredDate = parseDate(rawAnsweredAt);
+
+    const rawEndedAt = callDto?.endedAt || callDto?.EndedAt || activeObj?.endedAt || activeObj?.EndedAt;
+    const parsedEndedDate = parseDate(rawEndedAt);
+
+    const normalizedParticipants = incomingParticipants.map((p: any) => {
+      const pId = p.personId || p.PersonId || p.id || p.Id;
+      const pPerson = availablePersonsRef.current.find(ap => Number(ap.id || ap.Id) === Number(pId));
+      return {
+        ...p,
+        personId: Number(pId),
+        name: p.name || p.Name || pPerson?.name || pPerson?.Name || (Number(pId) === currentUserId ? 'You' : `User ${pId}`),
+        imageUrl: p.imageUrl || p.ImageUrl || pPerson?.imageUrl || pPerson?.ImageUrl || pPerson?.picture || '',
+        status: p.status !== undefined ? p.status : p.Status
+      };
+    });
+
+    const duration = (callDto?.duration !== undefined && callDto?.duration !== null) ? callDto.duration : (activeObj?.duration || 0);
+
+    const result: any = {
+      ...(activeObj || {}),
+      ...(callDto || {}),
+      id: numericCallId,
+      callId: numericCallId,
+      chatId: chatId ? Number(chatId) : undefined,
+      callerPersonId: callerId ? Number(callerId) : undefined,
+      chatName: chatName,
+      imageUrl: imageUrl,
+      type: callType !== undefined ? callType : 1,
+      isGroup: callDto?.isGroup !== undefined ? callDto.isGroup : (callDto?.IsGroup !== undefined ? callDto.IsGroup : (activeObj?.isGroup || matchingChat?.isGroup || false)),
+      status: mappedStatus !== undefined ? mappedStatus : 0,
+      startedAt: validStartedAt,
+      answeredAt: parsedAnsweredDate ? parsedAnsweredDate.toISOString() : activeObj?.answeredAt,
+      endedAt: parsedEndedDate ? parsedEndedDate.toISOString() : activeObj?.endedAt,
+      isIncoming: isIncoming !== undefined ? isIncoming : true,
+      isMissed: isMissed !== undefined ? isMissed : false,
+      duration: duration,
+      participants: normalizedParticipants,
+    };
+
+    if (result.status === 3) {
+      if (!result.endedAt) result.endedAt = new Date().toISOString();
+    } else if (result.status === 4 || result.status === 5) {
+      result.isMissed = true;
+      if (!result.endedAt) result.endedAt = new Date().toISOString();
+    }
+
+    if (result.answeredAt && result.endedAt && (!result.duration || result.duration === 0)) {
+      const start = parseDate(result.answeredAt)?.getTime();
+      const end = parseDate(result.endedAt)?.getTime();
+      if (start && end && end > start) {
+        result.duration = Math.floor((end - start) / 1000);
+      }
+    } else if (result.startedAt && result.endedAt && (!result.duration || result.duration === 0)) {
+      const start = parseDate(result.startedAt)?.getTime();
+      const end = parseDate(result.endedAt)?.getTime();
+      if (start && end && end > start) {
+        result.duration = Math.floor((end - start) / 1000);
+      }
+    }
+
+    return result;
+  };
+
+  const updateCallInLogs = async (callDto: any, fallbackActiveCall?: any) => {
+    const normCall = normalizeCallLogItem(callDto, fallbackActiveCall);
+    if (!normCall) return;
+
+    setCallLogs(prev => {
+      const idx = prev.findIndex(item => Number(item.id || item.Id || item.callId || item.CallId) === Number(normCall.id));
+      if (idx !== -1) {
+        const next = [...prev];
+        const existing = next[idx];
+        const merged = {
+          ...existing,
+          ...normCall,
+          chatName: (normCall.chatName && normCall.chatName !== 'Secure Call') ? normCall.chatName : (existing.chatName || 'Secure Call'),
+          imageUrl: normCall.imageUrl || existing.imageUrl || '',
+          participants: normCall.participants?.length ? normCall.participants : (existing.participants || [])
+        };
+        saveData(STORES.LOGS, merged).catch(err => console.warn("Failed to persist merged call log in IDB:", err));
+        next[idx] = merged;
+        return next;
+      } else {
+        saveData(STORES.LOGS, normCall).catch(err => console.warn("Failed to persist call log in IDB:", err));
+        return [normCall, ...prev];
+      }
+    });
+  };
+
+  const joinCallFromLog = async (log: any) => {
+    if (!log) return;
+    const isMissed = log.isMissed || log.IsMissed || log.status === 4 || log.status === 'Missed' || log.status === 5 || log.status === 'Rejected';
+    if (isMissed) return;
+    try {
+      triggerHaptic('medium');
+      const token = localStorage.getItem('auth_token') || '';
+      const callId = log.id || log.Id;
+      
+      await acceptCall(Number(callId))
+        .catch((err) => console.warn("HTTP AcceptCall failed, proceeding locally:", err));
+
+      if (onNavigateToChats) {
+        onNavigateToChats();
+      }
+
+      const callChatId = log.chatId || log.ChatId;
+      if (callChatId) {
+        const matchingChat = localChatList.find(c => Number(c.id) === Number(callChatId));
+        if (matchingChat) {
+          setActiveChat(matchingChat);
+        }
+      }
+
+      const connectedCall = {
+        ...log,
+        status: 2,
+        Status: 2,
+        answeredAt: log.answeredAt || new Date().toISOString()
+      };
+      setActiveCall(connectedCall);
+      setCallState('connected');
+      stopRinging();
+      playCallConnectSound();
+      
+      setCallDuration(0);
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+
+      await startLocalStream(log.type === 2 || log.Type === 2);
+
+      updateCallInLogs(connectedCall);
+
+      const toggleDto = {
+        callId: Number(callId),
+        CallId: Number(callId),
+        chatId: parseInt(log.chatId || log.ChatId),
+        ChatId: parseInt(log.chatId || log.ChatId),
+        personId: Number(currentUserIdRef.current),
+        PersonId: Number(currentUserIdRef.current),
+        isMuted: isMuted,
+        IsMuted: isMuted,
+        isCameraEnabled: isCameraEnabled,
+        IsCameraEnabled: isCameraEnabled,
+        isSharing: isScreenSharing,
+        IsSharing: isScreenSharing
+      };
+      if (String(homeSecurityHubConnection.state) === 'Connected') {
+        await homeSecurityHubConnection.invoke("ToggleCallItems", toggleDto, token).catch(e => console.warn("ToggleCallItems error on join:", e));
+      }
+
+      setTimeout(() => {
+        initiateWebRTCOffer();
+      }, 300);
+    } catch (err) {
+      console.error("Failed to join call from log", err);
+    }
+  };
+
+  const checkAndSetOngoingCall = (logsList: any[]) => {
+    if (!logsList || logsList.length === 0) return;
+    const currentUid = Number(currentUserIdRef.current);
+
+    const ongoingCall = logsList.find((log: any) => {
+      const rawStatus = log.status !== undefined ? log.status : log.Status;
+      const isEnded = rawStatus === 3 || rawStatus === 'Ended' || rawStatus === 5 || rawStatus === 'Rejected' || Boolean(log.endedAt || log.EndedAt);
+      const isMissed = log.isMissed || log.IsMissed || rawStatus === 4 || rawStatus === 'Missed';
+      if (isEnded || isMissed) return false;
+
+      const isStatusOngoing = rawStatus === 0 || rawStatus === 1 || rawStatus === 2 ||
+        rawStatus === 'Initiated' || rawStatus === 'Ringing' || rawStatus === 'Connected' ||
+        rawStatus === 'Active' || rawStatus === 'Ongoing';
+
+      return isStatusOngoing;
+    });
+
+    if (ongoingCall && (callStateRef.current === 'idle' || !activeCallRef.current)) {
+      const enriched = enrichCallDto(ongoingCall);
+      const callerId = enriched.callerPersonId || enriched.CallerPersonId;
+      const isCaller = Number(callerId) === currentUid;
+      const rawStatus = enriched.status !== undefined ? enriched.status : enriched.Status;
+
+      if (!isCaller) {
+        setIncomingCall(enriched);
+        setActiveCall(enriched);
+        setCallState('ringing_incoming');
+        startRinging();
+        triggerHaptic('incoming');
+      } else {
+        setActiveCall(enriched);
+        if (rawStatus === 2 || rawStatus === 'Connected' || rawStatus === 'Active') {
+          setCallState('connected');
+        } else {
+          setCallState('ringing_outgoing');
+        }
+      }
+    }
+  };
+
+  const fetchCallLogs = async (page = 1, append = false) => {
+    if (page === 1 && !append) {
+      setIsCallLogsLoading(true);
+      setCallLogsPage(1);
+      setHasMoreCallLogs(true);
+      try {
+        const cached = await getAllData(STORES.LOGS);
+        if (Array.isArray(cached) && cached.length > 0) {
+          const sortedCached = [...cached].sort((a: any, b: any) => {
+            const tA = parseDate(a.startedAt || a.StartedAt)?.getTime() || 0;
+            const tB = parseDate(b.startedAt || b.StartedAt)?.getTime() || 0;
+            return tB - tA;
+          });
+          const normalizedCached = sortedCached.map(c => normalizeCallLogItem(c)).filter(Boolean);
+          setCallLogs(normalizedCached);
+          checkAndSetOngoingCall(normalizedCached);
+        }
+      } catch (err) {
+        console.warn("Failed to load cached call logs", err);
+      }
+    } else {
+      setIsCallLogsFetchingMore(true);
+    }
+
+    try {
+      const response = await getCallLogs(page, 50);
+      const data = response?.data ?? response?.Data ?? response ?? [];
+      const dataArr = Array.isArray(data) ? data : [];
+      
+      if (dataArr.length < 50) {
+        setHasMoreCallLogs(false);
+      } else {
+        setHasMoreCallLogs(true);
+      }
+
+      const normalizedLogs = dataArr.map((log: any) => normalizeCallLogItem(log)).filter(Boolean);
+
+      if (normalizedLogs.length > 0) {
+        for (const log of normalizedLogs) {
+          await saveData(STORES.LOGS, log).catch((e) => console.warn("Failed to save log item to IDB:", e));
+        }
+
+        setCallLogs(prev => {
+          if (!append) {
+            const serverIds = new Set(normalizedLogs.map((l: any) => Number(l.id || l.Id)));
+            const extraLive = prev.filter((p: any) => !serverIds.has(Number(p.id || p.Id)));
+            return [...extraLive, ...normalizedLogs];
+          } else {
+            const existingIds = new Set(prev.map((p: any) => Number(p.id || p.Id)));
+            const uniqueNew = normalizedLogs.filter((l: any) => !existingIds.has(Number(l.id || l.Id)));
+            return [...prev, ...uniqueNew];
+          }
+        });
+
+        setCallLogsPage(page);
+        if (!append) {
+          checkAndSetOngoingCall(normalizedLogs);
+        }
+      } else if (!append) {
+        setCallLogs([]);
+      }
+    } catch (err) {
+      console.error("Failed to fetch call logs", err);
+    } finally {
+      setIsCallLogsLoading(false);
+      setIsCallLogsFetchingMore(false);
+    }
+  };
+
+  const fetchMoreCallLogs = () => {
+    if (hasMoreCallLogs && !isCallLogsLoading && !isCallLogsFetchingMore) {
+      fetchCallLogs(callLogsPage + 1, true);
+    }
+  };
+
+  const cleanupActiveCall = () => {
+    stopRinging();
+    playCallDisconnectSound();
+    
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      setLocalStream(null);
+    }
+    
+    Object.values(peerConnectionsRef.current).forEach(pc => {
+      try {
+        (pc as any).close();
+      } catch (e) {}
+    });
+    peerConnectionsRef.current = {};
+    
+    if (callTimerRef.current) {
+      clearInterval(callTimerRef.current);
+      callTimerRef.current = null;
+    }
+    if (analyserIntervalRef.current) {
+      clearInterval(analyserIntervalRef.current);
+      analyserIntervalRef.current = null;
+    }
+    
+    setActiveCall(null);
+    setIncomingCall(null);
+    setCallDuration(0);
+    setRemoteStreams({});
+    setIsMuted(false);
+    setIsCameraEnabled(true);
+    setIsScreenSharing(false);
+    setIsCallMinimized(false);
+    setCallState('disconnected');
+    setTimeout(() => {
+      setCallState(prev => prev === 'disconnected' ? 'idle' : prev);
+    }, 1500);
+  };
+
+  const setupSimulatedAnalyser = () => {
+    if (analyserIntervalRef.current) clearInterval(analyserIntervalRef.current);
+    analyserIntervalRef.current = setInterval(() => {
+      const heights = Array.from({ length: 10 }, () => Math.floor(Math.random() * 40) + 10);
+      setAudioAnalyserData(heights);
+    }, 120);
+  };
+
+  const startLocalStream = async (video: boolean) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: video ? { width: 640, height: 480, facingMode: 'user' } : false
+      });
+      setLocalStream(stream);
+      if (isMuted) {
+        stream.getAudioTracks().forEach(track => {
+          track.enabled = false;
+        });
+      }
+      if (!isCameraEnabled && video) {
+        stream.getVideoTracks().forEach(track => {
+          track.enabled = false;
+        });
+      }
+      if (localVideoRef.current && video) {
+        localVideoRef.current.srcObject = stream;
+      }
+      
+      try {
+        const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 32;
+        source.connect(analyser);
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        
+        analyserIntervalRef.current = setInterval(() => {
+          analyser.getByteFrequencyData(dataArray);
+          const heights = Array.from(dataArray).slice(0, 10).map(val => Math.max(10, Math.floor(val / 3)));
+          setAudioAnalyserData(heights);
+        }, 100);
+      } catch (ae) {
+        setupSimulatedAnalyser();
+      }
+      return stream;
+    } catch (err) {
+      console.warn("getUserMedia blocked or failed, using simulated stream tracks", err);
+      setupSimulatedAnalyser();
+      return null;
+    }
+  };
+
+  const initiateWebRTCOffer = async () => {
+    console.log("[WebRTC] Initiating WebRTC Offer...");
+    try {
+      const token = localStorage.getItem('auth_token') || '';
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      
+      const partner = (activeCall?.participants || activeCall?.Participants || []).find((p: any) => Number(p.personId || p.PersonId) !== Number(currentUserId));
+      const partnerId = partner?.personId || partner?.PersonId || 0;
+      peerConnectionsRef.current[partnerId] = pc;
+      
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+      
+      pc.onicecandidate = (event) => {
+        if (event.candidate && activeCall) {
+          const candidateDto = {
+            callId: Number(activeCall.id || activeCall.Id),
+            CallId: Number(activeCall.id || activeCall.Id),
+            chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+            ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+            personId: Number(currentUserIdRef.current),
+            PersonId: Number(currentUserIdRef.current),
+            candidate: JSON.stringify(event.candidate),
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex
+          };
+          homeSecurityHubConnection.invoke("IceCandidate", candidateDto, token)
+            .catch(err => console.warn("Failed to send ICE Candidate", err));
+        }
+      };
+      
+      pc.ontrack = (event) => {
+        console.log("[WebRTC] Remote track received:", event.streams[0]);
+        setRemoteStreams(prev => ({
+          ...prev,
+          [partnerId]: event.streams[0]
+        }));
+      };
+      
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      if (activeCall) {
+        const offerDto = {
+          callId: Number(activeCall.id || activeCall.Id),
+          CallId: Number(activeCall.id || activeCall.Id),
+          chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+          ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+          personId: Number(currentUserIdRef.current),
+          PersonId: Number(currentUserIdRef.current),
+          sdp: JSON.stringify(offer),
+          Sdp: JSON.stringify(offer)
+        };
+        
+        await homeSecurityHubConnection.invoke("Offer", offerDto, token);
+        console.log("[WebRTC] Offer sent successfully!");
+      }
+    } catch (err) {
+      console.warn("Failed to initiate WebRTC Offer", err);
+    }
+  };
+
+  const handleOffer = async (dto: any) => {
+    console.log("[WebRTC] SDP Offer received:", dto);
+    if (!dto) return;
+    
+    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+    const currentUid = Number(currentUserIdRef.current);
+    if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
+      console.log("[WebRTC] Ignored SDP Offer from self.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('auth_token') || '';
+      const pc = new RTCPeerConnection({
+        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      });
+      
+      const partnerId = dtoPersonId || dto.callerPersonId || dto.CallerPersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
+      peerConnectionsRef.current[partnerId] = pc;
+      
+      if (localStream) {
+        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      }
+      
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          const candidateDto = {
+            callId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
+            CallId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
+            chatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
+            ChatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
+            personId: Number(currentUserIdRef.current),
+            PersonId: Number(currentUserIdRef.current),
+            candidate: JSON.stringify(event.candidate),
+            sdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex
+          };
+          homeSecurityHubConnection.invoke("IceCandidate", candidateDto, token)
+            .catch(err => console.warn("Failed to send ICE Candidate", err));
+        }
+      };
+      
+      pc.ontrack = (event) => {
+        console.log("[WebRTC] Remote track received (callee):", event.streams[0]);
+        setRemoteStreams(prev => ({
+          ...prev,
+          [partnerId]: event.streams[0]
+        }));
+      };
+      
+      const sdpVal = dto.sdp || dto.Sdp;
+      const offerSdp = typeof sdpVal === 'string' ? JSON.parse(sdpVal) : sdpVal;
+      await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
+      
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      
+      const answerDto = {
+        callId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
+        CallId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
+        chatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
+        ChatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
+        personId: Number(currentUserIdRef.current),
+        PersonId: Number(currentUserIdRef.current),
+        sdp: JSON.stringify(answer),
+        Sdp: JSON.stringify(answer)
+      };
+      
+      await homeSecurityHubConnection.invoke("Answer", answerDto, token);
+      console.log("[WebRTC] Answer sent successfully!");
+    } catch (err) {
+      console.warn("Failed to handle offer", err);
+    }
+  };
+
+  const handleAnswer = async (dto: any) => {
+    console.log("[WebRTC] SDP Answer received:", dto);
+    if (!dto) return;
+
+    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+    const currentUid = Number(currentUserIdRef.current);
+    if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
+      console.log("[WebRTC] Ignored SDP Answer from self.");
+      return;
+    }
+
+    try {
+      const partnerId = dtoPersonId || dto.personId || dto.PersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
+      const pc = peerConnectionsRef.current[partnerId];
+      if (pc) {
+        const answerSdp = JSON.parse(dto.sdp);
+        await pc.setRemoteDescription(new RTCSessionDescription(answerSdp));
+        console.log("[WebRTC] Remote description set for answer successfully!");
+      }
+    } catch (err) {
+      console.warn("Failed to handle answer", err);
+    }
+  };
+
+  const handleIceCandidate = async (dto: any) => {
+    console.log("[WebRTC] ICE Candidate received:", dto);
+    if (!dto) return;
+
+    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+    const currentUid = Number(currentUserIdRef.current);
+    if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
+      console.log("[WebRTC] Ignored ICE Candidate from self.");
+      return;
+    }
+
+    try {
+      const partnerId = dtoPersonId || dto.personId || dto.PersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
+      const pc = peerConnectionsRef.current[partnerId];
+      if (pc && dto.candidate) {
+        const candObj = JSON.parse(dto.candidate);
+        await pc.addIceCandidate(new RTCIceCandidate(candObj));
+        console.log("[WebRTC] ICE Candidate added successfully!");
+      }
+    } catch (err) {
+      console.warn("Failed to handle ICE candidate", err);
+    }
+  };
+
+  const proceedWithStartCall = async (type: number) => {
+    if (!activeChat) return;
+    try {
+      triggerHaptic('light');
+      const response = await startCall(parseInt(activeChat.id), type);
+      const callData = response?.data ?? response?.Data ?? response;
+      if (callData) {
+        setActiveCall(callData);
+        setCallState('ringing_outgoing');
+        startLocalStream(type === 2);
+      }
+    } catch (err) {
+      console.error("Failed to start call", err);
+      alert("Could not start call. Please try again.");
+    }
+  };
+
+  const handleTriggerStartCall = async (type: number) => {
+    if (!activeChat) return;
+    proceedWithStartCall(type);
+  };
+
+  const proceedWithAcceptCall = async () => {
+    if (!activeCall) return;
+    try {
+      triggerHaptic('medium');
+      const token = localStorage.getItem('auth_token') || '';
+      const callId = activeCall.id || activeCall.Id;
+      
+      await acceptCall(Number(callId))
+        .catch((err) => console.warn("HTTP AcceptCall failed, proceeding locally:", err));
+
+      // Automatically transition to chats view on call acceptance
+      if (onNavigateToChats) {
+        onNavigateToChats();
+      }
+
+      // Automatically open the matching chat room on call acceptance
+      const callChatId = activeCall.chatId || activeCall.ChatId;
+      if (callChatId) {
+        const matchingChat = localChatList.find(c => Number(c.id) === Number(callChatId));
+        if (matchingChat) {
+          setActiveChat(matchingChat);
+        }
+      }
+
+      const connectedCall = {
+        ...activeCall,
+        status: 2,
+        Status: 2,
+        answeredAt: activeCall.answeredAt || new Date().toISOString()
+      };
+      setActiveCall(connectedCall);
+      setCallState('connected');
+      stopRinging();
+      playCallConnectSound();
+      
+      setCallDuration(0);
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+
+      await startLocalStream(activeCall.type === 2 || activeCall.Type === 2);
+
+      updateCallInLogs(connectedCall);
+
+      // Invoke SignalR ToggleCallItems, Offer, and IceCandidate as requested
+      const toggleDto = {
+        callId: Number(callId),
+        CallId: Number(callId),
+        chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        personId: Number(currentUserIdRef.current),
+        PersonId: Number(currentUserIdRef.current),
+        isMuted: isMuted,
+        IsMuted: isMuted,
+        isCameraEnabled: isCameraEnabled,
+        IsCameraEnabled: isCameraEnabled,
+        isSharing: isScreenSharing,
+        IsSharing: isScreenSharing
+      };
+      if (String(homeSecurityHubConnection.state) === 'Connected') {
+        await homeSecurityHubConnection.invoke("ToggleCallItems", toggleDto, token).catch(e => console.warn("ToggleCallItems error on accept:", e));
+      }
+
+      setTimeout(() => {
+        initiateWebRTCOffer();
+      }, 300);
+    } catch (err) {
+      console.error("Failed to accept call", err);
+    }
+  };
+
+  const handleAcceptCall = async () => {
+    if (!activeCall) return;
+    proceedWithAcceptCall();
+  };
+
+  const handleRejectCall = async () => {
+    if (!activeCall) return;
+    const savedCall = activeCall;
+    try {
+      triggerHaptic('heavy');
+      const callId = activeCall.id || activeCall.Id;
+      const currentStatus = activeCall.status !== undefined ? activeCall.status : activeCall.Status;
+      const isConnected = callState === 'connected' || Number(currentStatus) === 2 || currentStatus === 'Connected';
+      
+      if (!isConnected) {
+        await rejectCall(Number(callId))
+          .catch(() => console.warn("HTTP RejectCall failed"));
+      } else {
+        console.warn("Attempted to call RejectCall on a connected call. Calling EndCall instead.");
+        await endCall(Number(callId))
+          .catch(() => console.warn("HTTP EndCall failed"));
+      }
+    } catch (err) {
+      console.warn("Error rejecting call", err);
+    } finally {
+      cleanupActiveCall();
+      updateCallInLogs({ ...savedCall, status: 5, isMissed: true }, savedCall);
+    }
+  };
+
+  const handleEndCall = async () => {
+    if (!activeCall) return;
+    const savedCall = activeCall;
+    try {
+      triggerHaptic('heavy');
+      const callId = activeCall.id || activeCall.Id;
+      const currentStatus = activeCall.status !== undefined ? activeCall.status : activeCall.Status;
+      const isConnected = callState === 'connected' || Number(currentStatus) === 2 || currentStatus === 'Connected';
+      
+      if (isConnected) {
+        await endCall(Number(callId))
+          .catch(() => console.warn("Backend EndCall failed, doing local cleanup"));
+      } else {
+        await rejectCall(Number(callId))
+          .catch(() => console.warn("HTTP RejectCall failed"));
+      }
+    } catch (err) {
+      console.error("Failed to end call", err);
+    } finally {
+      cleanupActiveCall();
+      updateCallInLogs({ ...savedCall, status: 3 }, savedCall);
+    }
+  };
+
+  const handleToggleMic = async () => {
+    if (!activeCall) return;
+    try {
+      const nextMuted = !isMuted;
+      setIsMuted(nextMuted);
+      
+      if (localStream) {
+        localStream.getAudioTracks().forEach(track => {
+          track.enabled = !nextMuted;
+        });
+      }
+      
+      const token = localStorage.getItem('auth_token') || '';
+      await homeSecurityHubConnection.invoke("ToggleCallItems", { 
+        callId: Number(activeCall.id || activeCall.Id), 
+        chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        personId: Number(currentUserIdRef.current),
+        isMuted: nextMuted,
+        isCameraEnabled: isCameraEnabled,
+        isSharing: isScreenSharing,
+        CallId: Number(activeCall.id || activeCall.Id), 
+        ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        PersonId: Number(currentUserIdRef.current),
+        IsMuted: nextMuted,
+        IsCameraEnabled: isCameraEnabled,
+        IsSharing: isScreenSharing
+      }, token).catch(() => console.warn("Failed to invoke ToggleCallItems"));
+    } catch (err) {
+      console.warn("Failed to toggle microphone", err);
+    }
+  };
+
+  const handleToggleCamera = async () => {
+    if (!activeCall) return;
+    try {
+      const nextCam = !isCameraEnabled;
+      setIsCameraEnabled(nextCam);
+      
+      let streamToUse = localStream;
+      if (nextCam && (!localStream || localStream.getVideoTracks().length === 0)) {
+        const newStream = await startLocalStream(true);
+        if (newStream) {
+          streamToUse = newStream;
+        }
+      } else if (localStream) {
+        localStream.getVideoTracks().forEach(track => {
+          track.enabled = nextCam;
+        });
+      }
+      
+      if (streamToUse) {
+        const videoTrack = streamToUse.getVideoTracks()[0];
+        if (videoTrack) {
+          Object.values(peerConnectionsRef.current).forEach((pc: RTCPeerConnection) => {
+            const senders = pc.getSenders();
+            const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+            if (videoSender) {
+              videoSender.replaceTrack(videoTrack).catch(err => console.warn("replaceTrack failed", err));
+            } else {
+              try {
+                pc.addTrack(videoTrack, streamToUse!);
+              } catch (e) {
+                console.warn("addTrack failed", e);
+              }
+            }
+          });
+        }
+      }
+      
+      const token = localStorage.getItem('auth_token') || '';
+      await homeSecurityHubConnection.invoke("ToggleCallItems", { 
+        callId: Number(activeCall.id || activeCall.Id), 
+        chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        personId: Number(currentUserIdRef.current),
+        isMuted: isMuted,
+        isCameraEnabled: nextCam,
+        isSharing: isScreenSharing,
+        CallId: Number(activeCall.id || activeCall.Id), 
+        ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        PersonId: Number(currentUserIdRef.current),
+        IsMuted: isMuted,
+        IsCameraEnabled: nextCam,
+        IsSharing: isScreenSharing
+      }, token).catch(() => console.warn("Failed to invoke ToggleCallItems"));
+    } catch (err) {
+      console.warn("Failed to toggle camera", err);
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (!activeCall) return;
+    try {
+      const nextSharing = !isScreenSharing;
+      setIsScreenSharing(nextSharing);
+      
+      triggerToast(nextSharing ? "Screen Sharing Active" : "Screen Sharing Inactive");
+      
+      const token = localStorage.getItem('auth_token') || '';
+      await homeSecurityHubConnection.invoke("ToggleCallItems", { 
+        callId: Number(activeCall.id || activeCall.Id), 
+        chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        personId: Number(currentUserIdRef.current),
+        isMuted: isMuted,
+        isCameraEnabled: isCameraEnabled,
+        isSharing: nextSharing,
+        CallId: Number(activeCall.id || activeCall.Id), 
+        ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        PersonId: Number(currentUserIdRef.current),
+        IsMuted: isMuted,
+        IsCameraEnabled: isCameraEnabled,
+        IsSharing: nextSharing
+      }, token).catch(() => console.warn("Failed to invoke ToggleCallItems"));
+    } catch (err) {
+      console.warn("Failed to toggle screen sharing", err);
+    }
+  };
 
   // Chat Bubble Theme and recording state enhancements
   const [chatThemeColor, setChatThemeColor] = useState(() => {
@@ -916,6 +2066,58 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
+
+  const activeCallRef = useRef<any | null>(null);
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
+
+  const localChatListRef = useRef<ChatRoom[]>([]);
+  useEffect(() => {
+    localChatListRef.current = localChatList;
+  }, [localChatList]);
+
+  const availablePersonsRef = useRef<any[]>([]);
+  useEffect(() => {
+    availablePersonsRef.current = availablePersons;
+  }, [availablePersons]);
+
+  const callStateRef = useRef<'idle' | 'ringing_outgoing' | 'ringing_incoming' | 'connected' | 'disconnected'>('idle');
+  useEffect(() => {
+    callStateRef.current = callState;
+  }, [callState]);
+
+  useEffect(() => {
+    if (callState !== 'connected' || !activeCall) {
+      setRemoteAudioLevels({});
+      return;
+    }
+
+    const interval = setInterval(() => {
+      const participants = activeCall.participants || activeCall.Participants || [];
+      const newLevels: {[personId: number]: number[]} = {};
+      
+      participants.forEach((p: any) => {
+        const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+        if (pId === Number(currentUserId)) return;
+        
+        const isParticipantMuted = p.isMuted !== undefined ? p.isMuted : p.IsMuted;
+        if (isParticipantMuted) {
+          newLevels[pId] = new Array(5).fill(4);
+        } else {
+          const speakingSeed = Math.random() > 0.15;
+          const heights = Array.from({ length: 5 }, () => 
+            speakingSeed ? Math.floor(Math.random() * 12) + 4 : 4
+          );
+          newLevels[pId] = heights;
+        }
+      });
+      
+      setRemoteAudioLevels(newLevels);
+    }, 120);
+
+    return () => clearInterval(interval);
+  }, [callState, activeCall, currentUserId]);
 
   const getMessageTickColor = (msg: any) => {
     if (msg.error) return 'text-red-500';
@@ -1298,7 +2500,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             updatedItem = {
               ...c,
               lastMessage: getDescriptiveLastMessage(msg),
-              time: new Date(msg.sentAt || msg.SentAt || new Date()).toLocaleDateString([], { month: 'short', day: 'numeric' }),
+              time: formatLastMessageTime(msg.sentAt || msg.SentAt || new Date()),
               unread: (msg.senderPersonId || msg.SenderPersonId) === currentUid ? c.unread : c.unread + 1,
               lastMessageSenderId: msg.senderPersonId || msg.SenderPersonId || 0,
               lastMessageSentAt: msg.sentAt || msg.SentAt || new Date().toISOString()
@@ -1422,7 +2624,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           id: chatIdStr,
           name: chat.name || chat.Name || 'New Chat',
           lastMessage: getDescriptiveLastMessage(chat.lastMessage || chat.LastMessage) || 'Created chat',
-          time: (chat.lastMessage?.sentAt || chat.LastMessage?.SentAt) ? new Date(chat.lastMessage?.sentAt || chat.LastMessage?.SentAt).toLocaleDateString([], { month: 'short', day: 'numeric' }) : 'Now',
+          time: formatLastMessageTime(chat.lastMessage?.sentAt || chat.LastMessage?.SentAt || chat.createdAt || chat.CreatedAt),
           unread: chat.unreadCount || chat.UnreadCount || 0,
           isGroup: chat.isGroup || chat.IsGroup || false,
           description: chat.description || chat.Description || '',
@@ -1664,11 +2866,27 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     const handleMessagesReadWrapped = (...args: any[]) => { console.log("[HOME_SIGNALR_EVENT: MessagesRead]", ...args); handleMessagesRead(extractPayload(args[0])); };
     const handleUpdateChatWrapped = (...args: any[]) => {
       console.log("[HOME_SIGNALR_EVENT: UpdateChat]", ...args);
-      if (args.length >= 2 && (args[0] === "GroupChatCreated" || args[0] === "ChatCreated")) {
-        const chatData = extractPayload(args[1]);
-        if (chatData) {
-          handleChatCreated(chatData);
-          const chatId = chatData.id ?? chatData.Id;
+      if (!args || args.length === 0) return;
+
+      let eventName = "";
+      let payload: any = null;
+
+      if (typeof args[0] === 'string') {
+        eventName = args[0];
+        if (args.length >= 3) {
+          payload = extractPayload(args[2]) || extractPayload(args[1]);
+        } else if (args.length === 2) {
+          payload = extractPayload(args[1]);
+        }
+      } else if (typeof args[0] === 'object' && args[0] !== null) {
+        payload = extractPayload(args[0]);
+        eventName = payload?.eventName || payload?.EventName || payload?.type || payload?.Type || "";
+      }
+
+      if (eventName === "GroupChatCreated" || eventName === "ChatCreated") {
+        if (payload) {
+          handleChatCreated(payload);
+          const chatId = payload.id ?? payload.Id;
           const parsedId = Number(chatId);
           if (!isNaN(parsedId)) {
             homeSecurityHubConnection.invoke("JoinChat", parsedId)
@@ -1676,18 +2894,256 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
               .catch(err => console.warn(`[SignalR] Failed to join newly created chat ${parsedId}:`, err));
           }
         }
-      } else if (args.length >= 3 && args[0] === "MessagesRead") {
-        handleMessagesRead(extractPayload(args[2]));
-      } else if (args.length >= 3 && args[0] === "MessageDeleted") {
-        handleMessageDeleted(extractPayload(args[2]));
-      } else if (args.length === 1) {
-        const payload = extractPayload(args[0]);
-        if (payload && (payload.eventName === "MessagesRead" || payload.EventName === "MessagesRead" || payload.chatId)) {
-          handleMessagesRead(payload);
-        } else if (payload && (payload.eventName === "MessageDeleted" || payload.EventName === "MessageDeleted" || payload.isDeleted || payload.IsDeleted)) {
-          handleMessageDeleted(payload);
+      } else if (eventName === "MessagesRead") {
+        handleMessagesRead(payload);
+      } else if (eventName === "MessageDeleted") {
+        handleMessageDeleted(payload);
+      } else if (eventName === "IncomingCall") {
+        const callDto = payload;
+        console.log("[SignalR Event: UpdateChat] IncomingCall received:", callDto);
+        if (callDto) {
+          const isCaller = Number(callDto.callerPersonId || callDto.CallerPersonId) === Number(currentUserIdRef.current);
+          if (!isCaller) {
+            setIncomingCall(callDto);
+            setActiveCall(callDto);
+            setCallState('ringing_incoming');
+            startRinging();
+            triggerHaptic('incoming');
+          } else {
+            if (callStateRef.current === 'idle' || callStateRef.current === 'disconnected') {
+              setActiveCall(callDto);
+              setCallState('ringing_outgoing');
+            }
+          }
+          updateCallInLogs(callDto);
+        }
+      } else if (eventName === "CallAccepted") {
+        const callDto = payload;
+        console.log("[SignalR Event: UpdateChat] CallAccepted received:", callDto);
+        if (callDto) {
+          setActiveCall(callDto);
+          setCallState('connected');
+          stopRinging();
+          playCallConnectSound();
+          
+          setCallDuration(0);
+          if (callTimerRef.current) clearInterval(callTimerRef.current);
+          callTimerRef.current = setInterval(() => {
+            setCallDuration(prev => prev + 1);
+          }, 1000);
+          
+          const isCaller = Number(callDto.callerPersonId || callDto.CallerPersonId) === Number(currentUserIdRef.current);
+          if (isCaller) {
+            setTimeout(() => {
+              initiateWebRTCOffer();
+            }, 500);
+          }
+          updateCallInLogs(callDto);
+        }
+      } else if (eventName === "CallParticipantJoined" || eventName === "CallParticipantConnected") {
+        const callDto = payload;
+        console.log("[SignalR Event: UpdateChat] CallParticipantJoined received:", callDto);
+        if (callDto) {
+          setActiveCall(callDto);
+          updateCallInLogs(callDto);
+        }
+      } else if (eventName === "CallParticipantLeft" || eventName === "ParticipantLeft") {
+        console.log(`[SignalR Event: UpdateChat] Participant Left received (${eventName}):`, payload);
+        if (payload) {
+          handleParticipantLeftDirect(payload);
+        }
+      } else if (eventName === "CallRejected") {
+        const rejectDto = payload;
+        console.log("[SignalR Event: UpdateChat] CallRejected received:", rejectDto);
+        if (rejectDto) {
+          const personId = rejectDto.personId || rejectDto.PersonId;
+          const callStatus = rejectDto.callStatus || rejectDto.CallStatus || rejectDto.status || rejectDto.Status;
+          const savedCall = activeCallRef.current;
+          if (Number(personId) === Number(currentUserIdRef.current) || callStatus === 3 || callStatus === 5 || callStatus === 'Ended' || callStatus === 'Rejected') {
+            cleanupActiveCall();
+          } else {
+            const actCall = activeCallRef.current;
+            if (actCall && !actCall.isGroup && !actCall.IsGroup) {
+              cleanupActiveCall();
+            } else {
+              setActiveCall((prev: any) => {
+                if (!prev) return null;
+                const participants = (prev.participants || []).map((p: any) => {
+                  const pId = p.personId || p.PersonId;
+                  if (Number(pId) === Number(personId)) {
+                    return { ...p, status: 2 }; 
+                  }
+                  return p;
+                });
+                return { ...prev, participants: participants, Participants: participants };
+              });
+            }
+          }
+          updateCallInLogs(rejectDto, savedCall);
+        }
+      } else if (eventName === "CallEnded") {
+        console.log("[SignalR Event: UpdateChat] CallEnded received");
+        const savedCall = activeCallRef.current;
+        cleanupActiveCall();
+        const callDto = payload;
+        updateCallInLogs(callDto || savedCall, savedCall);
+      } else if (eventName === "CallTimedOut") {
+        console.log("[SignalR Event: UpdateChat] CallTimedOut received");
+        const savedCall = activeCallRef.current;
+        cleanupActiveCall();
+        const callDto = payload;
+        updateCallInLogs(callDto || savedCall, savedCall);
+      } else if (eventName === "ToggleCallItems" || eventName === "CallItemsToggled") {
+        handleToggleCallItemsWrapped(payload);
+      } else if (payload && (payload.eventName === "MessagesRead" || payload.EventName === "MessagesRead" || payload.chatId)) {
+        handleMessagesRead(payload);
+      } else if (payload && (payload.eventName === "MessageDeleted" || payload.EventName === "MessageDeleted" || payload.isDeleted || payload.IsDeleted)) {
+        handleMessageDeleted(payload);
+      }
+    };
+    const handleIncomingCallDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: IncomingCall Direct]", payload);
+      const callDto = extractPayload(payload);
+      if (!callDto) return;
+      const isCaller = Number(callDto.callerPersonId || callDto.CallerPersonId) === Number(currentUserIdRef.current);
+      if (!isCaller) {
+        setIncomingCall(callDto);
+        setActiveCall(callDto);
+        setCallState('ringing_incoming');
+        startRinging();
+        triggerHaptic('incoming');
+      } else {
+        if (callStateRef.current === 'idle' || callStateRef.current === 'disconnected') {
+          setActiveCall(callDto);
+          setCallState('ringing_outgoing');
         }
       }
+      updateCallInLogs(callDto);
+    };
+
+    const handleCallAcceptedDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: CallAccepted Direct]", payload);
+      const callDto = extractPayload(payload);
+      if (!callDto) return;
+      setActiveCall(callDto);
+      setCallState('connected');
+      stopRinging();
+      playCallConnectSound();
+      
+      setCallDuration(0);
+      if (callTimerRef.current) clearInterval(callTimerRef.current);
+      callTimerRef.current = setInterval(() => {
+        setCallDuration(prev => prev + 1);
+      }, 1000);
+      
+      const isCaller = Number(callDto.callerPersonId || callDto.CallerPersonId) === Number(currentUserIdRef.current);
+      if (isCaller) {
+        setTimeout(() => {
+          initiateWebRTCOffer();
+        }, 500);
+      }
+      updateCallInLogs(callDto);
+    };
+
+    const handleParticipantLeftDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: ParticipantLeft Direct]", payload);
+      const callDto = extractPayload(payload);
+      if (!callDto) return;
+
+      const currentUserId = Number(currentUserIdRef.current);
+      const leftPersonId = callDto.personId || callDto.PersonId || callDto.participantPersonId || callDto.ParticipantPersonId || callDto.leftPersonId || callDto.LeftPersonId;
+      const currentStatus = callDto.status !== undefined ? callDto.status : callDto.Status;
+      const savedCall = activeCallRef.current;
+
+      // If current user is the one who left, or if call ended globally
+      if ((leftPersonId && Number(leftPersonId) === currentUserId) || currentStatus === 3 || currentStatus === 'Ended') {
+        cleanupActiveCall();
+        updateCallInLogs(callDto, savedCall);
+        return;
+      }
+
+      // Update activeCall state by filtering out the left participant from ongoing call
+      setActiveCall((prev: any) => {
+        if (!prev) return null;
+
+        const isGroup = prev.isGroup || prev.IsGroup || callDto.isGroup || callDto.IsGroup;
+        const incomingList = callDto.participants || callDto.Participants || [];
+        const existingList = prev.participants || prev.Participants || [];
+        const baseList = incomingList.length > 0 ? incomingList : existingList;
+
+        const updatedParticipants = baseList.filter((p: any) => {
+          const pId = p.personId || p.PersonId || p.id || p.Id;
+          const pStatus = p.status !== undefined ? p.status : p.Status;
+          if (leftPersonId && Number(pId) === Number(leftPersonId)) return false;
+          if (pStatus === 2 || pStatus === 'Left' || pStatus === 'Rejected' || pStatus === 'Disconnected') return false;
+          return true;
+        });
+
+        const activeOthers = updatedParticipants.filter((p: any) => {
+          const pId = p.personId || p.PersonId || p.id || p.Id;
+          return Number(pId) !== currentUserId;
+        });
+
+        if (activeOthers.length === 0) {
+          cleanupActiveCall();
+          return null;
+        }
+
+        return {
+          ...prev,
+          ...callDto,
+          participants: updatedParticipants,
+          Participants: updatedParticipants
+        };
+      });
+
+      updateCallInLogs(callDto, savedCall);
+    };
+
+    const handleCallRejectedDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: CallRejected Direct]", payload);
+      const rejectDto = extractPayload(payload);
+      if (!rejectDto) return;
+      const personId = rejectDto.personId || rejectDto.PersonId;
+      const callStatus = rejectDto.callStatus || rejectDto.CallStatus || rejectDto.status || rejectDto.Status;
+      const savedCall = activeCallRef.current;
+      if (Number(personId) === Number(currentUserIdRef.current) || callStatus === 3 || callStatus === 5 || callStatus === 'Ended' || callStatus === 'Rejected') {
+        cleanupActiveCall();
+      } else {
+        const actCall = activeCallRef.current;
+        if (actCall && !actCall.isGroup && !actCall.IsGroup) {
+          cleanupActiveCall();
+        } else {
+          setActiveCall((prev: any) => {
+            if (!prev) return null;
+            const participants = (prev.participants || []).map((p: any) => {
+              const pId = p.personId || p.PersonId;
+              if (Number(pId) === Number(personId)) {
+                return { ...p, status: 2 }; 
+              }
+              return p;
+            });
+            return { ...prev, participants: participants, Participants: participants };
+          });
+        }
+      }
+      updateCallInLogs(rejectDto, savedCall);
+    };
+
+    const handleCallEndedDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: CallEnded Direct]", payload);
+      const savedCall = activeCallRef.current;
+      cleanupActiveCall();
+      const callDto = extractPayload(payload);
+      updateCallInLogs(callDto || savedCall, savedCall);
+    };
+
+    const handleCallTimedOutDirect = (payload: any) => {
+      console.log("[HOME_SIGNALR_EVENT: CallTimedOut Direct]", payload);
+      const savedCall = activeCallRef.current;
+      cleanupActiveCall();
+      const callDto = extractPayload(payload);
+      updateCallInLogs(callDto || savedCall, savedCall);
     };
     const handleUserOnlineWrapped = (...args: any[]) => {
       console.log("[HOME_SIGNALR_EVENT: UserOnline]", ...args);
@@ -1699,6 +3155,51 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           return next;
         });
       }
+    };
+
+    const handleOfferWrapped = (dto: any) => {
+      handleOffer(extractPayload(dto));
+    };
+    const handleAnswerWrapped = (dto: any) => {
+      handleAnswer(extractPayload(dto));
+    };
+    const handleIceCandidateWrapped = (dto: any) => {
+      handleIceCandidate(extractPayload(dto));
+    };
+    const handleToggleCallItemsWrapped = (dto: any) => {
+      const payload = extractPayload(dto);
+      const personId = payload.personId || payload.PersonId || payload.personIdToggled || 0;
+      const isMuted = payload.isMuted !== undefined ? payload.isMuted : payload.IsMuted;
+      const isCameraEnabled = payload.isCameraEnabled !== undefined ? payload.isCameraEnabled : payload.IsCameraEnabled;
+      const isSharing = payload.isSharing !== undefined ? payload.isSharing : payload.IsSharing;
+      console.log(`[SignalR Event] Call items toggled by ${personId}: Muted=${isMuted}, Camera=${isCameraEnabled}, Sharing=${isSharing}`);
+      
+      if (Number(personId) === Number(currentUserIdRef.current)) {
+        setIsMuted(isMuted);
+        setIsCameraEnabled(isCameraEnabled);
+        setIsScreenSharing(isSharing);
+      }
+
+      setActiveCall((prev: any) => {
+        if (!prev) return null;
+        const participants = (prev.participants || []).map((p: any) => {
+          if (Number(p.personId || p.PersonId) === Number(personId)) {
+            return { 
+              ...p, 
+              isMuted, 
+              isCameraEnabled, 
+              isSharing,
+              IsMuted: isMuted,
+              IsCameraEnabled: isCameraEnabled,
+              IsSharing: isSharing
+            };
+          }
+          return p;
+        });
+        const updatedCall = { ...prev, participants, Participants: participants };
+        updateCallInLogs(updatedCall);
+        return updatedCall;
+      });
     };
 
     homeSecurityHubConnection.on("MessageSent", handleMessageSentWrapped);
@@ -1714,7 +3215,24 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     homeSecurityHubConnection.on("ParticipantRemoved", handleParticipantRemovedWrapped);
     homeSecurityHubConnection.on("MessagesRead", handleMessagesReadWrapped);
     homeSecurityHubConnection.on("UpdateChat", handleUpdateChatWrapped);
+    homeSecurityHubConnection.on("IncomingCall", handleIncomingCallDirect);
+    homeSecurityHubConnection.on("CallAccepted", handleCallAcceptedDirect);
+    homeSecurityHubConnection.on("CallParticipantJoined", handleCallAcceptedDirect);
+    homeSecurityHubConnection.on("CallParticipantConnected", handleCallAcceptedDirect);
+    homeSecurityHubConnection.on("CallParticipantLeft", handleParticipantLeftDirect);
+    homeSecurityHubConnection.on("ParticipantLeft", handleParticipantLeftDirect);
+    homeSecurityHubConnection.on("CallRejected", handleCallRejectedDirect);
+    homeSecurityHubConnection.on("CallEnded", handleCallEndedDirect);
+    homeSecurityHubConnection.on("CallTimedOut", handleCallTimedOutDirect);
     homeSecurityHubConnection.on("UserOnline", handleUserOnlineWrapped);
+    homeSecurityHubConnection.on("Offer", handleOfferWrapped);
+    homeSecurityHubConnection.on("ReceiveOffer", handleOfferWrapped);
+    homeSecurityHubConnection.on("Answer", handleAnswerWrapped);
+    homeSecurityHubConnection.on("ReceiveAnswer", handleAnswerWrapped);
+    homeSecurityHubConnection.on("IceCandidate", handleIceCandidateWrapped);
+    homeSecurityHubConnection.on("ReceiveIceCandidate", handleIceCandidateWrapped);
+    homeSecurityHubConnection.on("ToggleCallItems", handleToggleCallItemsWrapped);
+    homeSecurityHubConnection.on("CallItemsToggled", handleToggleCallItemsWrapped);
 
     return () => {
       homeSecurityHubConnection.off("MessageSent", handleMessageSentWrapped);
@@ -1730,7 +3248,24 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
       homeSecurityHubConnection.off("ParticipantRemoved", handleParticipantRemovedWrapped);
       homeSecurityHubConnection.off("MessagesRead", handleMessagesReadWrapped);
       homeSecurityHubConnection.off("UpdateChat", handleUpdateChatWrapped);
+      homeSecurityHubConnection.off("IncomingCall", handleIncomingCallDirect);
+      homeSecurityHubConnection.off("CallAccepted", handleCallAcceptedDirect);
+      homeSecurityHubConnection.off("CallParticipantJoined", handleCallAcceptedDirect);
+      homeSecurityHubConnection.off("CallParticipantConnected", handleCallAcceptedDirect);
+      homeSecurityHubConnection.off("CallParticipantLeft", handleParticipantLeftDirect);
+      homeSecurityHubConnection.off("ParticipantLeft", handleParticipantLeftDirect);
+      homeSecurityHubConnection.off("CallRejected", handleCallRejectedDirect);
+      homeSecurityHubConnection.off("CallEnded", handleCallEndedDirect);
+      homeSecurityHubConnection.off("CallTimedOut", handleCallTimedOutDirect);
       homeSecurityHubConnection.off("UserOnline", handleUserOnlineWrapped);
+      homeSecurityHubConnection.off("Offer", handleOfferWrapped);
+      homeSecurityHubConnection.off("ReceiveOffer", handleOfferWrapped);
+      homeSecurityHubConnection.off("Answer", handleAnswerWrapped);
+      homeSecurityHubConnection.off("ReceiveAnswer", handleAnswerWrapped);
+      homeSecurityHubConnection.off("IceCandidate", handleIceCandidateWrapped);
+      homeSecurityHubConnection.off("ReceiveIceCandidate", handleIceCandidateWrapped);
+      homeSecurityHubConnection.off("ToggleCallItems", handleToggleCallItemsWrapped);
+      homeSecurityHubConnection.off("CallItemsToggled", handleToggleCallItemsWrapped);
     };
   }, []);
 
@@ -1862,7 +3397,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           let lastMsgTime = "Just now";
           if (chat.lastMessage) {
             lastMsgText = getDescriptiveLastMessage(chat.lastMessage);
-            lastMsgTime = new Date(chat.lastMessage.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            lastMsgTime = formatLastMessageTime(chat.lastMessage.sentAt || chat.lastMessage.SentAt);
           }
 
           return {
@@ -1920,6 +3455,18 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
   // Fetch All data from cache or network
   useEffect(() => {
     const loadInitial = async () => {
+      try {
+        const cachedLogs = await getAllData(STORES.LOGS);
+        if (Array.isArray(cachedLogs) && cachedLogs.length > 0) {
+          setCallLogs(cachedLogs);
+        }
+      } catch (err) {
+        console.warn("Failed to load initial cached call logs:", err);
+      }
+
+      // Fetch fresh call logs exactly once at startup/load
+      fetchCallLogs();
+
       if (Array.isArray((window as any).__cachedChats) && (window as any).__cachedChats.length > 0) {
         setLocalChatList((window as any).__cachedChats);
         setIsChatsLoading(false);
@@ -2084,9 +3631,11 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
   // Handle notification to parent wrapper to disable layout frame tabs
   useEffect(() => {
-    onChatActive(!!activeChat);
-    return () => onChatActive(false);
-  }, [activeChat, onChatActive]);
+    if (isViewActive) {
+      onChatActive(!!activeChat);
+      return () => onChatActive(false);
+    }
+  }, [activeChat, onChatActive, isViewActive]);
 
   // Update activeChatId in localStorage for notifications
   useEffect(() => {
@@ -3254,9 +4803,15 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
     URL.revokeObjectURL(url);
   };
 
+  if (!isViewActive && callState === 'idle') {
+    return null;
+  }
+
   return (
-    <div className="h-full flex flex-col bg-[#F0F2F5] dark:bg-[#0c0c0e] text-zinc-800 dark:text-zinc-200 relative">
-      <AnimatePresence initial={false} mode="wait">
+    <div className={isViewActive ? "absolute inset-0 flex flex-col bg-[#F0F2F5] dark:bg-[#0c0c0e] text-zinc-800 dark:text-zinc-200" : ""}>
+      {isViewActive && (
+        <>
+          <AnimatePresence initial={false} mode="wait">
         {!activeChat ? (
           <motion.div 
             key="chatList"
@@ -3277,15 +4832,42 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                   </button>
                 </div>
               </div>
-              <div className="relative mb-4">
+              <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
                 <input 
                   type="text" 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search chats" 
+                  placeholder={activeSidebarTab === 'chats' ? "Search chats" : "Search call logs"} 
                   className="w-full bg-transparent border border-zinc-200 py-2 pl-10 pr-4 text-xs text-zinc-800 outline-none focus:border-black transition-colors rounded-md placeholder-zinc-400 text-black dark:text-white"
                 />
+              </div>
+
+              {/* WhatsApp Segmented Tab Toggle */}
+              <div className="flex bg-zinc-100 dark:bg-zinc-900 p-1 rounded-lg mb-1">
+                <button
+                  onClick={() => setActiveSidebarTab('chats')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                    activeSidebarTab === 'chats'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200/50 dark:border-zinc-700/50'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                  }`}
+                >
+                  <MessageCircle size={14} /> Chats
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveSidebarTab('calls');
+                    fetchCallLogs();
+                  }}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-all flex items-center justify-center gap-2 ${
+                    activeSidebarTab === 'calls'
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-white shadow-sm border border-zinc-200/50 dark:border-zinc-700/50'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
+                  }`}
+                >
+                  <Phone size={14} /> Call Logs
+                </button>
               </div>
             </div>
 
@@ -3324,6 +4906,16 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
             {/* Chat List Wrapper with Loading state */}
             <div 
               ref={listScrollRef}
+              onScroll={(e) => {
+                if (activeSidebarTab === 'calls') {
+                  const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+                  if (scrollHeight - scrollTop - clientHeight < 120) {
+                    if (hasMoreCallLogs && !isCallLogsLoading && !isCallLogsFetchingMore) {
+                      fetchMoreCallLogs();
+                    }
+                  }
+                }
+              }}
               onTouchStart={handleTouchStart}
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
@@ -3333,12 +4925,205 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
               onMouseLeave={() => { pullStartRef.current = null; setPullDistance(0); }}
               className="flex-1 overflow-y-auto w-full border-t border-zinc-100 touch-pan-y"
             >
-              {isChatsLoading && !isRefreshing ? (
-                <div className="flex flex-col items-center justify-center py-20 gap-3 text-zinc-400">
-                  <LoaderCircle className="animate-spin text-black" size={32} />
-                  <p className="text-xs font-bold uppercase tracking-wider">Syncing Secure Chats...</p>
-                </div>
-              ) : localChatList.length === 0 ? (
+              {activeSidebarTab === 'calls' ? (
+                isCallLogsLoading ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3 text-zinc-400">
+                    <LoaderCircle className="animate-spin text-emerald-500" size={32} />
+                    <p className="text-xs font-bold uppercase tracking-wider">Loading Call Logs...</p>
+                  </div>
+                ) : callLogs.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-20 px-6 text-center text-zinc-400">
+                    <Phone className="w-12 h-12 text-zinc-300 mb-3 animate-pulse" />
+                    <h4 className="text-sm font-black text-zinc-700 uppercase tracking-wider">No Recent Calls</h4>
+                    <p className="text-xs text-zinc-500 max-w-xs mt-1">Select any chat partner and tap the phone or video icon to start a high-fidelity call.</p>
+                  </div>
+                ) : (
+                  <>
+                    {[...callLogs]
+                      .filter(log => {
+                        if (!searchQuery.trim()) return true;
+                        const foundChat = localChatList.find(c => String(c.id) === String(log.chatId || log.ChatId));
+                        const callerId = log.callerPersonId || log.CallerPersonId;
+                        const isCaller = Number(callerId) === currentUserId;
+                        let partnerId = !isCaller && callerId ? Number(callerId) : null;
+                        if (!partnerId && log.participants?.length > 0) {
+                          const otherP = log.participants.find((p: any) => Number(p.personId || p.PersonId || p.id || p.Id) !== currentUserId);
+                          if (otherP) partnerId = Number(otherP.personId || otherP.PersonId || otherP.id || otherP.Id);
+                        }
+                        const partnerPerson = partnerId ? availablePersons.find(p => Number(p.id || p.Id) === partnerId) : null;
+                        const displayName = foundChat?.name || log.chatName || log.ChatName || log.groupName || log.GroupName || partnerPerson?.name || partnerPerson?.Name || (partnerId ? `User ${partnerId}` : 'Secure Call');
+                        return displayName.toLowerCase().includes(searchQuery.toLowerCase());
+                      })
+                      .map((log: any) => {
+                        const isIncoming = log.isIncoming || log.IsIncoming;
+                        const isEnded = log.status === 3 || log.status === 'Ended' || Boolean(log.endedAt || log.EndedAt);
+                        const isMissed = log.isMissed || log.IsMissed || log.status === 4 || log.status === 'Missed' || log.status === 5 || log.status === 'Rejected';
+                        const isVideo = log.type === 2 || log.Type === 2;
+                        const dateStr = log.startedAt || log.StartedAt;
+                        
+                        const foundChat = localChatList.find(c => String(c.id) === String(log.chatId || log.ChatId));
+                        const callerId = log.callerPersonId || log.CallerPersonId;
+                        const isCaller = Number(callerId) === currentUserId;
+                        let partnerId = !isCaller && callerId ? Number(callerId) : null;
+                        if (!partnerId && log.participants?.length > 0) {
+                          const otherP = log.participants.find((p: any) => Number(p.personId || p.PersonId || p.id || p.Id) !== currentUserId);
+                          if (otherP) partnerId = Number(otherP.personId || otherP.PersonId || otherP.id || otherP.Id);
+                        }
+                        if (!partnerId && foundChat?.participants?.length > 0) {
+                          const otherPart = foundChat.participants.find((p: any) => Number(p.personId || p.PersonId || p.id || p.Id) !== currentUserId);
+                          if (otherPart) partnerId = Number(otherPart.personId || otherPart.PersonId || otherPart.id || otherPart.Id);
+                        }
+                        const partnerPerson = partnerId ? availablePersons.find(p => Number(p.id || p.Id) === partnerId) : null;
+
+                        const displayName = foundChat?.name || log.chatName || log.ChatName || log.groupName || log.GroupName || partnerPerson?.name || partnerPerson?.Name || (partnerId ? `User ${partnerId}` : 'Secure Call');
+                        const chatImg = foundChat?.imageUrl || foundChat?.ImageUrl || log.imageUrl || log.ImageUrl || log.chatImage || log.ChatImage || partnerPerson?.imageUrl || partnerPerson?.ImageUrl || partnerPerson?.picture;
+                        const formattedDate = formatLogDate(dateStr);
+                        
+                        const isOngoing = !isEnded && !isMissed && (log.status === 1 || log.status === 2 || log.status === 'Ringing' || log.status === 'Connected');
+                        
+                        let statusText = '';
+                        let statusColor = 'text-zinc-500';
+                        if (log.status === 1 || log.status === 'Ringing') {
+                          statusText = 'Ringing';
+                          statusColor = 'text-amber-600 font-bold animate-pulse';
+                        } else if (log.status === 2 || log.status === 'Connected') {
+                          statusText = 'Connected';
+                          statusColor = 'text-emerald-600 font-bold';
+                        } else if (log.status === 3 || log.status === 'Ended') {
+                          statusText = 'Ended';
+                          statusColor = 'text-zinc-500';
+                        } else if (log.status === 4 || log.status === 'Missed') {
+                          statusText = 'Missed';
+                          statusColor = 'text-rose-500 font-bold';
+                        } else if (log.status === 5 || log.status === 'Rejected') {
+                          statusText = 'Rejected';
+                          statusColor = 'text-rose-600 font-semibold';
+                        } else {
+                          statusText = isIncoming ? (isMissed ? 'Missed' : 'Answered') : 'Completed';
+                          statusColor = isMissed ? 'text-rose-500 font-bold' : 'text-zinc-500';
+                        }
+
+                        return (
+                          <div 
+                            key={log.id || log.Id}
+                            className="flex items-start justify-between p-4 border-b border-zinc-100 hover:bg-zinc-50 transition-colors gap-3"
+                          >
+                            <div className="flex items-start gap-3 flex-1 min-w-0">
+                              <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center border border-zinc-200 text-zinc-700 font-extrabold relative overflow-hidden shrink-0 mt-0.5">
+                                {chatImg ? (
+                                  <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                                ) : (
+                                  displayName ? displayName.charAt(0).toUpperCase() : '?'
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <h4 className="font-bold text-sm text-zinc-800 truncate leading-snug">{displayName}</h4>
+                                <div className="flex items-center gap-1 mt-0.5">
+                                  {isIncoming ? (
+                                    isMissed ? (
+                                      <ArrowDownLeft size={14} className="text-rose-500 shrink-0" />
+                                    ) : (
+                                      <ArrowDownLeft size={14} className="text-emerald-500 shrink-0" />
+                                    )
+                                  ) : (
+                                    <ArrowUpRight size={14} className="text-zinc-400 shrink-0" />
+                                  )}
+                                  <span className={`text-[10px] truncate ${statusColor}`}>
+                                    {isIncoming ? 'Incoming' : 'Outgoing'} • {statusText}
+                                    {` • ${formatCallDuration(log.duration || 0)}`}
+                                    {formattedDate && ` • ${formattedDate}`}
+                                  </span>
+                                </div>
+
+                                {/* Participant lists for Group calls or multi-participant logs */}
+                                {log.participants && log.participants.length > 0 && (
+                                  <div className="flex flex-wrap gap-1.5 mt-2">
+                                    {log.participants.map((p: any, idx: number) => {
+                                      const pId = p.personId || p.PersonId || p.id || p.Id;
+                                      const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(pId));
+                                      const pName = Number(pId) === Number(currentUserId) ? "You" : (personDetails?.name || personDetails?.Name || `User ${pId}`);
+                                      const pStatus = p.status !== undefined ? p.status : p.Status;
+                                      
+                                      let badgeColor = "bg-zinc-50 text-zinc-500 border-zinc-100";
+                                      let statusLabel = "Ringing";
+                                      
+                                      if (pStatus === 1 || pStatus === "Ringing") {
+                                        statusLabel = "Ringing";
+                                        badgeColor = "bg-amber-50/80 text-amber-600 border-amber-100/50";
+                                      } else if (pStatus === 2 || pStatus === "Connected") {
+                                        statusLabel = "Joined";
+                                        badgeColor = "bg-emerald-50/80 text-emerald-600 border-emerald-100/50";
+                                      } else if (pStatus === 3 || pStatus === "Ended") {
+                                        statusLabel = "Ended";
+                                        badgeColor = "bg-zinc-50 text-zinc-500 border-zinc-200/50";
+                                      } else if (pStatus === 4 || pStatus === "Missed") {
+                                        statusLabel = "Missed";
+                                        badgeColor = "bg-orange-50/80 text-orange-600 border-orange-100/50";
+                                      } else if (pStatus === 5 || pStatus === "Rejected") {
+                                        statusLabel = "Declined";
+                                        badgeColor = "bg-rose-50/80 text-rose-600 border-rose-100/50";
+                                      }
+                                      
+                                      return (
+                                        <span 
+                                          key={pId || idx}
+                                          className={`text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded border ${badgeColor} flex items-center gap-1`}
+                                        >
+                                          <span className="max-w-[70px] truncate">{pName}</span>
+                                          <span className="opacity-40">•</span>
+                                          <span>{statusLabel}</span>
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {isOngoing && !isEnded && !isMissed ? (
+                              <button
+                                onClick={() => joinCallFromLog(log)}
+                                className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white text-xs font-black uppercase tracking-wider rounded-full transition-all flex items-center gap-1 shadow-sm shrink-0 border border-emerald-600 animate-pulse"
+                                title="Join active call"
+                              >
+                                <PhoneCall size={12} className="animate-bounce" />
+                                <span>Join</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={async () => {
+                                  const foundChat = localChatList.find(c => String(c.id) === String(log.chatId || log.ChatId));
+                                  if (foundChat) {
+                                    setActiveChat(foundChat);
+                                    handleTriggerStartCall(isVideo ? 2 : 1);
+                                  } else {
+                                    alert("Open the chat to call this user.");
+                                  }
+                                }}
+                                className="p-2 bg-zinc-50 hover:bg-emerald-50 text-zinc-500 hover:text-emerald-600 rounded-full transition-all border border-zinc-200"
+                                title="Call back"
+                              >
+                                {isVideo ? <Video size={16} /> : <Phone size={16} />}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    {isCallLogsFetchingMore && (
+                      <div className="flex items-center justify-center py-4 gap-2 text-zinc-400 border-b border-zinc-100">
+                        <LoaderCircle className="animate-spin text-emerald-500" size={18} />
+                        <span className="text-xs font-semibold">Loading more calls...</span>
+                      </div>
+                    )}
+                  </>
+                )
+              ) : (
+                isChatsLoading && !isRefreshing ? (
+                  <div className="flex flex-col items-center justify-center py-20 gap-3 text-zinc-400">
+                    <LoaderCircle className="animate-spin text-black" size={32} />
+                    <p className="text-xs font-bold uppercase tracking-wider">Syncing Secure Chats...</p>
+                  </div>
+                ) : localChatList.length === 0 ? (
                 <div className="text-center py-20 px-6 text-zinc-500 text-sm font-medium leading-relaxed max-w-sm mx-auto">
                   No chats initiated yet. Create a group chat or message another user to start a chat
                 </div>
@@ -3365,7 +5150,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                                 id: res.id.toString(),
                                 name: res.name || chat.name,
                                 lastMessage: res.lastMessage ? getDescriptiveLastMessage(res.lastMessage) : chat.lastMessage,
-                                time: res.lastMessage?.sentAt ? new Date(res.lastMessage.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : chat.time,
+                                time: formatLastMessageTime(res.lastMessage?.sentAt || res.lastMessage?.SentAt, chat.time),
                                 unread: res.unreadCount || 0,
                                 isGroup: !!res.isGroup,
                                 description: res.description || chat.description,
@@ -3424,7 +5209,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                           })()}
                         </h3>
                         <span className={`text-[10px] shrink-0 ${(chat.unread > 0 && chat.lastMessageSenderId !== currentUserId) ? 'text-green-600 font-bold' : 'text-zinc-400'}`}>
-                          {chat.time}
+                          {formatLastMessageTime(chat.lastMessageSentAt, chat.time)}
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
@@ -3460,7 +5245,8 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
                     </div>
                   </div>
                 ))
-              )}
+              )
+            )}
             </div>
           </motion.div>
         ) : (
@@ -3482,98 +5268,118 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
             {/* Chat Header */}
             <header className="bg-white border-b border-zinc-200 flex items-center p-3 shrink-0 h-16 shadow-sm z-10 justify-between">
-              <div className="flex items-center">
+              <div className="flex items-center min-w-0 flex-1">
                 <button 
                   onClick={() => setActiveChat(null)}
-                  className="flex items-center p-2 text-zinc-500 hover:text-black hover:bg-zinc-50 rounded-full transition-all mr-2"
+                  className="flex items-center p-2 text-zinc-500 hover:text-black hover:bg-zinc-50 rounded-full transition-all mr-2 shrink-0"
                 >
                   <ChevronLeft size={20} />
                 </button>
-                <div className="w-10 h-10 bg-zinc-100 border border-black flex items-center justify-center shrink-0 mr-3 rounded-full text-black overflow-hidden relative">
-                   {(() => {
-                     if (activeChat.isGroup) {
-                       return activeChat.imageUrl ? (
-                         <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" />
-                       ) : (
-                         <Users size={20} />
-                       );
-                     } else {
-                       const partner = activeChat.participants?.find((p: any) => {
-                         const pId = p.personId || p.PersonId || p.id || p.Id;
-                         return Number(pId) !== Number(currentUserId);
-                       });
-                       const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
-                       const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
-                       const partnerImg = activeChat.imageUrl || activeChat.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
-                       const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
-                       return partnerImg ? (
-                         <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
-                       ) : (
-                         <span className="font-extrabold text-sm">{partnerName.charAt(0).toUpperCase()}</span>
-                       );
-                     }
-                   })()}
-                </div>
-                <div>
-                  <h3 className="font-bold text-zinc-800 text-sm tracking-wide">
+                
+                {/* Clickable Header Name and Info container */}
+                <div 
+                  onClick={() => {
+                    if (activeChat.isGroup) {
+                      triggerHaptic('light');
+                      setShowChatInfo(true);
+                    }
+                  }}
+                  className={`flex items-center min-w-0 rounded-xl p-1 -ml-1 pr-3 transition-all ${
+                    activeChat.isGroup ? 'cursor-pointer hover:opacity-80 active:scale-[0.98]' : ''
+                  }`}
+                  title={activeChat.isGroup ? "View Group Details" : undefined}
+                >
+                  <div className="w-10 h-10 bg-zinc-100 border border-black flex items-center justify-center shrink-0 mr-3 rounded-full text-black overflow-hidden relative">
+                     {(() => {
+                       if (activeChat.isGroup) {
+                         return activeChat.imageUrl ? (
+                           <img src={getImageUrl(activeChat.imageUrl)} alt={activeChat.name} className="w-full h-full object-cover" />
+                         ) : (
+                           <Users size={20} />
+                         );
+                       } else {
+                         const partner = activeChat.participants?.find((p: any) => {
+                           const pId = p.personId || p.PersonId || p.id || p.Id;
+                           return Number(pId) !== Number(currentUserId);
+                         });
+                         const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                         const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                         const partnerImg = activeChat.imageUrl || activeChat.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                         const partnerName = personDetails?.name || personDetails?.Name || activeChat.name;
+                         return partnerImg ? (
+                           <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                         ) : (
+                           <span className="font-extrabold text-sm">{partnerName.charAt(0).toUpperCase()}</span>
+                         );
+                       }
+                     })()}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-zinc-800 text-sm tracking-wide truncate">
+                      {(() => {
+                        if (activeChat.isGroup) {
+                          return activeChat.name;
+                        } else {
+                          const partner = activeChat.participants?.find((p: any) => {
+                            const pId = p.personId || p.PersonId || p.id || p.Id;
+                            return Number(pId) !== Number(currentUserId);
+                          });
+                          const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                          return personDetails?.name || personDetails?.Name || activeChat.name;
+                        }
+                      })()}
+                    </h3>
                     {(() => {
-                      if (activeChat.isGroup) {
-                        return activeChat.name;
-                      } else {
+                      if (!activeChat.isGroup) {
                         const partner = activeChat.participants?.find((p: any) => {
                           const pId = p.personId || p.PersonId || p.id || p.Id;
                           return Number(pId) !== Number(currentUserId);
                         });
                         const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
-                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
-                        return personDetails?.name || personDetails?.Name || activeChat.name;
+                        const isOnline = partnerId && (onlineUsers.has(Number(partnerId)) || !!(partner?.isOnline ?? partner?.IsOnline));
+                        return (
+                          <p className={`text-[10px] ${isOnline ? 'text-green-600' : 'text-zinc-500'} font-bold uppercase tracking-wider flex items-center gap-1`}>
+                            {isOnline && <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>}
+                            {isOnline ? "Online" : "Offline"}
+                          </p>
+                        );
+                      } else {
+                        return (
+                          <p className="text-[10px] text-green-600 font-medium tracking-tight truncate max-w-[180px] sm:max-w-[280px]">
+                            {activeChat.participants && activeChat.participants.length > 0
+                              ? activeChat.participants.map((p: any) => {
+                                  const pid = p.personId || p.PersonId || p.id || p.Id;
+                                  const cachedPerson = availablePersons.find(ap => (ap.id || ap.Id) === pid);
+                                  const nameStr = cachedPerson?.name || cachedPerson?.Name || p.fullName || p.FullName || p.Name || `User #${pid}`;
+                                  return nameStr.split(' ')[0];
+                                }).filter(Boolean).join(', ')
+                              : 'online encryption active'}
+                          </p>
+                        );
                       }
                     })()}
-                  </h3>
-                  {(() => {
-                    if (!activeChat.isGroup) {
-                      const partner = activeChat.participants?.find((p: any) => {
-                        const pId = p.personId || p.PersonId || p.id || p.Id;
-                        return Number(pId) !== Number(currentUserId);
-                      });
-                      const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
-                      const isOnline = partnerId && (onlineUsers.has(Number(partnerId)) || !!(partner?.isOnline ?? partner?.IsOnline));
-                      return (
-                        <p className={`text-[10px] ${isOnline ? 'text-green-600' : 'text-zinc-500'} font-bold uppercase tracking-wider flex items-center gap-1`}>
-                          {isOnline && <span className="w-1.5 h-1.5 bg-green-500 rounded-full inline-block"></span>}
-                          {isOnline ? "Online" : "Offline"}
-                        </p>
-                      );
-                    } else {
-                      return (
-                        <p className="text-[10px] text-green-600 font-medium tracking-tight truncate max-w-[180px] sm:max-w-[280px]">
-                          {activeChat.participants && activeChat.participants.length > 0
-                            ? activeChat.participants.map((p: any) => {
-                                const pid = p.personId || p.PersonId || p.id || p.Id;
-                                const cachedPerson = availablePersons.find(ap => (ap.id || ap.Id) === pid);
-                                const nameStr = cachedPerson?.name || cachedPerson?.Name || p.fullName || p.FullName || p.Name || `User #${pid}`;
-                                return nameStr.split(' ')[0];
-                              }).filter(Boolean).join(', ')
-                            : 'online encryption active'}
-                        </p>
-                      );
-                    }
-                  })()}
+                  </div>
                 </div>
               </div>
               
-              <div className="flex items-center gap-2">
-                {/* Info Button to Open Group Details */}
-                {activeChat.isGroup && (
-                  <button 
-                    onClick={() => setShowChatInfo(true)}
-                    className="p-2 text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-all"
-                    title="View Group Details"
-                  >
-                    <Info size={20} />
-                  </button>
-                )}
-
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Call buttons */}
+                <button
+                  onClick={() => handleTriggerStartCall(1)}
+                  className="p-2 text-zinc-500 hover:text-emerald-600 hover:bg-zinc-50 rounded-full transition-all flex items-center justify-center"
+                  title="Voice Call"
+                >
+                  <Phone size={18} />
+                </button>
+                <button
+                  onClick={() => handleTriggerStartCall(2)}
+                  className="p-2 text-zinc-500 hover:text-emerald-600 hover:bg-zinc-50 rounded-full transition-all flex items-center justify-center"
+                  title="Video Call"
+                >
+                  <Video size={18} />
+                </button>
+ 
                 {/* Search Button */}
                 <button 
                   onClick={() => setIsSearchingMessages(prev => !prev)}
@@ -4173,7 +5979,7 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
 
             {/* Chat/Group Information details modal */}
             <AnimatePresence>
-              {showChatInfo && (
+              {showChatInfo && activeChat && activeChat.isGroup && (
                 <motion.div 
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -5201,6 +7007,1074 @@ export default function Chats({ onChatActive, onRefreshPage }: { onChatActive: (
           </div>
         </div>
       )}
+        </>
+      )}
+
+      {/* Premium Full-Screen WhatsApp-style Calling Overlay */}
+      <AnimatePresence>
+        {callState !== 'idle' && activeCall && !isCallMinimized && (
+          <motion.div
+            initial={{ opacity: 0, scale: 1.05 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="fixed inset-0 z-[250] bg-zinc-950 text-white flex flex-col justify-between overflow-hidden select-none"
+          >
+            {/* Minimize button */}
+            <button
+              onClick={() => {
+                triggerHaptic('light');
+                setIsCallMinimized(true);
+              }}
+              className="absolute top-6 left-6 z-[260] p-2.5 bg-white/10 hover:bg-white/20 active:scale-95 text-white rounded-xl backdrop-blur-md transition-all border border-white/10 flex items-center justify-center cursor-pointer"
+              title="Minimize Call"
+            >
+              <ChevronDown size={18} />
+            </button>
+
+            {/* Elegant dark calling backdrop gradient */}
+            <div className="absolute inset-0 z-0 bg-gradient-to-b from-zinc-900/60 via-zinc-950 to-black pointer-events-none" />
+            
+            {/* Secure end-to-end encryption tag */}
+            <div className="absolute top-6 left-0 right-0 flex justify-center z-10 pointer-events-none">
+              <span className="bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest text-emerald-400 flex items-center gap-1.5 border border-white/5">
+                <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping"></span>
+                End-To-End Encrypted
+              </span>
+            </div>
+
+            {/* MAIN RINGING / CONNECTED CONTENT AREA */}
+            <div className="flex-1 flex flex-col items-center justify-center pt-24 px-6 z-10">
+              
+              {/* Outgoing Call Ringing View */}
+              {callState === 'ringing_outgoing' && (
+                <div className="flex flex-col items-center text-center w-full">
+                  {/* WhatsApp-style live video background if video call */}
+                  {(activeCall.type === 2 || activeCall.Type === 2) && localStream && (
+                    <div className="absolute inset-0 z-0 bg-black overflow-hidden rounded-3xl">
+                      <video
+                        ref={(el) => {
+                          if (el && el.srcObject !== localStream) {
+                            el.srcObject = localStream;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover scale-x-[-1] opacity-60"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/80" />
+                    </div>
+                  )}
+
+                  <div className="relative mb-8 z-10">
+                    <motion.div
+                      animate={{ scale: [1, 1.3, 1] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                      className="absolute inset-0 bg-emerald-500/20 rounded-full blur-xl"
+                    />
+                    <div className="w-32 h-32 bg-zinc-800 border-2 border-emerald-500 rounded-full flex items-center justify-center text-5xl font-black shadow-2xl overflow-hidden">
+                      {(() => {
+                        if (activeCall.isGroup || activeCall.IsGroup) {
+                          const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                          const chatImg = foundChat?.imageUrl || foundChat?.ImageUrl || activeCall.imageUrl || activeCall.ImageUrl;
+                          const displayName = foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                          return chatImg ? (
+                            <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                          ) : (
+                            <Users size={48} className="text-emerald-400" />
+                          );
+                        } else {
+                          const partner = activeCall.participants?.find((p: any) => {
+                            const pId = p.personId || p.PersonId || p.id || p.Id;
+                            return Number(pId) !== Number(currentUserId);
+                          });
+                          const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                          const partnerImg = activeCall.imageUrl || activeCall.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                          const partnerName = personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                          return partnerImg ? (
+                            <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                          ) : (
+                            partnerName.charAt(0).toUpperCase()
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-black tracking-wide text-white drop-shadow-md">
+                    {(() => {
+                      if (activeCall.isGroup || activeCall.IsGroup) {
+                        const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                        return foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                      } else {
+                        const partner = activeCall.participants?.find((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          return Number(pId) !== Number(currentUserId);
+                        });
+                        const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                        return personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                      }
+                    })()}
+                  </h2>
+                  <p className="text-zinc-400 font-bold uppercase tracking-wider text-xs mt-2 animate-pulse">Ringing secure line...</p>
+                  
+                  {/* WhatsApp-style Group Participants avatars layout on calling */}
+                  {(activeCall.isGroup || activeCall.IsGroup) && (
+                    <div className="mt-8 flex flex-col items-center gap-3">
+                      <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Group Call Participants</p>
+                      <div className="flex -space-x-3 overflow-hidden p-1">
+                        {(activeCall.participants || []).map((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          if (Number(pId) === Number(currentUserId)) return null;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(pId));
+                          const pName = personDetails?.name || personDetails?.Name || `User ${pId}`;
+                          const pImg = personDetails?.imageUrl || personDetails?.ImageUrl || p.profileImageUrl || p.ProfileImageUrl;
+                          return (
+                            <div key={pId} className="w-10 h-10 rounded-full border-2 border-zinc-950 bg-zinc-800 flex items-center justify-center overflow-hidden font-bold text-xs" title={pName}>
+                              {pImg ? (
+                                <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
+                              ) : (
+                                pName.charAt(0).toUpperCase()
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Incoming Call Ringing View */}
+              {callState === 'ringing_incoming' && (
+                <div className="flex flex-col items-center text-center">
+                  <div className="relative mb-8">
+                    <motion.div
+                      animate={{ scale: [1, 1.4, 1] }}
+                      transition={{ duration: 1.5, repeat: Infinity }}
+                      className="absolute inset-0 bg-indigo-500/30 rounded-full blur-2xl"
+                    />
+                    <div className="w-32 h-32 bg-zinc-800 border-2 border-indigo-500 rounded-full flex items-center justify-center text-5xl font-black shadow-2xl overflow-hidden">
+                      {(() => {
+                        if (activeCall.isGroup || activeCall.IsGroup) {
+                          // Group call avatar
+                          const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                          const chatImg = foundChat?.imageUrl || foundChat?.ImageUrl || activeCall.imageUrl || activeCall.ImageUrl;
+                          const displayName = foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                          return chatImg ? (
+                            <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                          ) : (
+                            <Users size={48} className="text-indigo-400" />
+                          );
+                        } else {
+                          // Direct call avatar
+                          const partner = activeCall.participants?.find((p: any) => {
+                            const pId = p.personId || p.PersonId || p.id || p.Id;
+                            return Number(pId) !== Number(currentUserId);
+                          });
+                          const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                          const partnerImg = activeCall.imageUrl || activeCall.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                          const partnerName = personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                          return partnerImg ? (
+                            <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                          ) : (
+                            partnerName.charAt(0).toUpperCase()
+                          );
+                        }
+                      })()}
+                    </div>
+                  </div>
+                  <h2 className="text-2xl font-black tracking-wide text-white drop-shadow-md">
+                    {(() => {
+                      if (activeCall.isGroup || activeCall.IsGroup) {
+                        const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                        return foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                      } else {
+                        const partner = activeCall.participants?.find((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          return Number(pId) !== Number(currentUserId);
+                        });
+                        const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                        return personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                      }
+                    })()}
+                  </h2>
+                  
+                  {/* Subtitle with caller name for group calls */}
+                  {(activeCall.isGroup || activeCall.IsGroup) && (
+                    <p className="text-zinc-400 text-sm mt-1 font-semibold">
+                      Started by {(() => {
+                        const callerId = activeCall.callerPersonId || activeCall.CallerPersonId;
+                        const callerDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(callerId));
+                        return callerDetails?.name || callerDetails?.Name || activeCall.callerName || activeCall.CallerName || "a participant";
+                      })()}
+                    </p>
+                  )}
+                  <p className="text-indigo-400 font-black uppercase tracking-widest text-[10px] mt-2.5 flex items-center gap-2 justify-center">
+                    <Phone className="animate-bounce animate-duration-1000" size={12} />
+                    Incoming {activeCall.type === 2 || activeCall.Type === 2 ? 'Secure Video' : 'Secure Voice'} Call
+                  </p>
+                  
+                  {/* WhatsApp-style Group Participants avatars layout on incoming */}
+                  {(activeCall.isGroup || activeCall.IsGroup) && (
+                    <div className="mt-8 flex flex-col items-center gap-3">
+                      <p className="text-xs text-zinc-400 font-bold uppercase tracking-wider">Group Call Participants</p>
+                      <div className="flex -space-x-3 overflow-hidden p-1">
+                        {(activeCall.participants || []).map((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          if (Number(pId) === Number(currentUserId)) return null;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(pId));
+                          const pName = personDetails?.name || personDetails?.Name || `User ${pId}`;
+                          const pImg = personDetails?.imageUrl || personDetails?.ImageUrl || p.profileImageUrl || p.ProfileImageUrl;
+                          return (
+                            <div key={pId} className="w-10 h-10 rounded-full border-2 border-zinc-950 bg-zinc-800 flex items-center justify-center overflow-hidden font-bold text-xs" title={pName}>
+                              {pImg ? (
+                                <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
+                              ) : (
+                                pName.charAt(0).toUpperCase()
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Connected Call View */}
+              {callState === 'connected' && (
+                <div className="w-full h-full flex flex-col items-center justify-between relative">
+                  
+                  {/* Video Streams Container */}
+                  {(activeCall.type === 2 || activeCall.Type === 2) ? (
+                    <div className="w-full h-full absolute inset-0 z-0 bg-black flex items-center justify-center overflow-hidden rounded-3xl">
+                      {/* Direct Video Call Header - Fully transparent, caller image, bolder name, timer right below */}
+                      {!activeCall.isGroup && !activeCall.IsGroup && (() => {
+                        const partner = activeCall.participants?.find((p: any) => {
+                          const pId = p.personId || p.PersonId || p.id || p.Id;
+                          return Number(pId) !== Number(currentUserId);
+                        });
+                        const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                        const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                        const partnerImg = activeCall.imageUrl || activeCall.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                        const partnerName = personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                        const partnerSharing = partner ? (partner.isSharing !== undefined ? partner.isSharing : (partner.IsSharing !== undefined ? partner.IsSharing : false)) : false;
+                        
+                        return (
+                          <div className="absolute top-16 left-6 right-6 z-20 flex items-center justify-between pointer-events-none select-none">
+                            <div className="flex items-center gap-3 bg-transparent border-none pointer-events-auto">
+                              {partnerImg ? (
+                                <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-11 h-11 rounded-full object-cover border border-zinc-700/50 shadow-lg" />
+                              ) : (
+                                <div className="w-11 h-11 rounded-full bg-zinc-800 border border-zinc-700/50 flex items-center justify-center font-black text-white text-base shadow-lg">
+                                  {partnerName.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div className="flex flex-col items-start bg-transparent text-left">
+                                <h2 className="text-sm font-black text-white leading-tight drop-shadow-md tracking-tight">
+                                  {partnerName}
+                                </h2>
+                                <span className="text-zinc-300 font-mono text-[10px] mt-0.5 leading-none drop-shadow-sm font-bold">
+                                  {formatCallDuration(callDuration)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {partnerSharing && (
+                              <div className="bg-emerald-500/85 backdrop-blur-md text-white px-2.5 py-1 rounded-md border border-emerald-400/50 flex items-center gap-1.5 shadow-[0_0_15px_rgba(16,185,129,0.4)] pointer-events-auto">
+                                <Monitor size={10} className="animate-pulse text-white" />
+                                <span className="text-[9px] font-black uppercase tracking-wider">Sharing Screen</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                      {activeCall.isGroup || activeCall.IsGroup ? (
+                        <div className="w-full h-full flex flex-col pt-16 pb-20">
+                          {/* Group Name Header - Fully transparent, group image, bolder name, timer right below */}
+                          <div className="text-center py-4 px-4 bg-transparent border-none flex flex-col items-center shrink-0 z-10">
+                            <div className="w-14 h-14 bg-zinc-800 border border-zinc-700/50 rounded-full flex items-center justify-center shadow-lg overflow-hidden mb-1.5">
+                              {(() => {
+                                const chatRoom = localChatList.find(c => Number(c.id) === Number(activeCall.chatId || activeCall.ChatId));
+                                const chatImg = chatRoom?.imageUrl || chatRoom?.ImageUrl || activeCall.imageUrl || activeCall.ImageUrl;
+                                const displayName = chatRoom?.name || chatRoom?.Name || activeCall.groupName || activeCall.GroupName || "Secure Group Call";
+                                return chatImg ? (
+                                  <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Users size={24} className="text-indigo-400" />
+                                );
+                              })()}
+                            </div>
+                            <h2 className="text-sm font-black text-white truncate max-w-xs mt-0.5">
+                              {(() => {
+                                const chatRoom = localChatList.find(c => Number(c.id) === Number(activeCall.chatId || activeCall.ChatId));
+                                return chatRoom?.name || chatRoom?.Name || activeCall.groupName || activeCall.GroupName || "Secure Group Call";
+                              })()}
+                            </h2>
+                            <span className="text-zinc-300 font-mono text-xs mt-1 font-bold">
+                              {formatCallDuration(callDuration)}
+                            </span>
+                          </div>
+                          
+                          <div className="flex-1 grid grid-cols-2 gap-2 p-2 overflow-y-auto">
+                            {(activeCall.participants || []).filter((p: any) => {
+                              const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+                              const pStatus = p.status !== undefined ? p.status : p.Status;
+                              return Number(pId) === Number(currentUserId) || pStatus === 1 || pStatus === "Connected";
+                            }).map((p: any) => {
+                              const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+                              if (pId === Number(currentUserId)) return null; // We are in Picture-in-Picture
+                              const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === pId);
+                              const pName = personDetails?.name || personDetails?.Name || `User ${pId}`;
+                              const rStream = remoteStreams[pId];
+                              const pImg = personDetails?.imageUrl || personDetails?.ImageUrl || p.profileImageUrl || p.ProfileImageUrl;
+                              const pStatus = p.status !== undefined ? p.status : p.Status;
+                              const isParticipantMuted = p.isMuted !== undefined ? p.isMuted : p.IsMuted;
+                              const isParticipantCameraEnabled = p.isCameraEnabled !== undefined ? p.isCameraEnabled : (p.IsCameraEnabled !== undefined ? p.IsCameraEnabled : true);
+                              const isParticipantSharing = p.isSharing !== undefined ? p.isSharing : (p.IsSharing !== undefined ? p.IsSharing : false);
+                              const showVideo = rStream && isParticipantCameraEnabled;
+
+                              return (
+                                <div key={pId} className="bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden relative flex items-center justify-center min-h-[140px]">
+                                  {/* Screen Share Indicator Overlay */}
+                                  {isParticipantSharing && (
+                                    <div className="absolute top-2 left-2 z-10 bg-emerald-500/80 backdrop-blur-md text-white px-1.5 py-1 rounded-md border border-emerald-400/50 flex items-center gap-1">
+                                      <Monitor size={10} className="animate-pulse text-white" />
+                                      <span className="text-[8px] font-black uppercase tracking-wider">Sharing</span>
+                                    </div>
+                                  )}
+                                  {showVideo ? (
+                                    <video
+                                      ref={(el) => {
+                                        if (el && el.srcObject !== rStream) {
+                                          el.srcObject = rStream;
+                                        }
+                                      }}
+                                      autoPlay
+                                      playsInline
+                                      className="w-full h-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="flex flex-col items-center text-center text-zinc-500 gap-2 p-4">
+                                      <div className="w-12 h-12 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center text-lg font-black overflow-hidden mb-1">
+                                        {pImg ? (
+                                          <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
+                                        ) : (
+                                          pName.charAt(0).toUpperCase()
+                                        )}
+                                      </div>
+                                      <p className="text-[10px] font-bold text-white truncate max-w-[120px]">{pName}</p>
+                                      <span className="text-[8px] uppercase tracking-widest text-zinc-400 font-bold">
+                                        {!isParticipantCameraEnabled ? "Camera Off" : (pStatus === 0 || pStatus === "Ringing" ? "Calling..." : pStatus === 1 || pStatus === "Connected" ? "Connecting video..." : "Offline")}
+                                      </span>
+                                    </div>
+                                  )}
+                                  
+                                  {/* Mic Status Indicator Overlay */}
+                                  <div className="absolute top-2 right-2 z-10 bg-black/60 px-1.5 py-1 rounded-md border border-white/10 flex items-center gap-1.5">
+                                    {isParticipantMuted ? (
+                                      <>
+                                        <MicOff size={10} className="text-rose-400" />
+                                        <span className="text-[8px] font-black uppercase text-rose-400 tracking-wider">Mute</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Mic size={10} className="text-emerald-400" />
+                                        {/* Mini wave animation */}
+                                        <div className="flex gap-0.5 items-end h-2.5">
+                                          {[1, 2, 3].map((idx) => {
+                                            let hVal = 2;
+                                            if (Number(pId) === Number(currentUserId)) {
+                                              const val = audioAnalyserData[idx % audioAnalyserData.length] || 15;
+                                              hVal = Math.max(2, Math.min(10, val / 6));
+                                            } else {
+                                              const levels = remoteAudioLevels[pId];
+                                              hVal = levels ? (levels[(idx - 1) % levels.length] / 1.6 || 2) : 2;
+                                            }
+                                            return (
+                                              <motion.div
+                                                key={idx}
+                                                className="w-0.5 bg-emerald-400 rounded-full"
+                                                animate={{
+                                                  height: [2, hVal, 2],
+                                                }}
+                                                transition={{
+                                                  duration: 0.15,
+                                                  ease: "easeInOut"
+                                                }}
+                                                style={{ height: 2 }}
+                                              />
+                                            );
+                                          })}
+                                        </div>
+                                      </>
+                                    )}
+                                  </div>
+
+                                  <span className="absolute bottom-2 left-2 bg-black/60 px-2 py-0.5 rounded text-[8px] font-bold text-white tracking-wide">
+                                    {pName}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Remote Video Feed */
+                        (() => {
+                          const partner = activeCall.participants?.find((p: any) => {
+                            const pId = p.personId || p.PersonId || p.id || p.Id;
+                            return Number(pId) !== Number(currentUserId);
+                          });
+                          const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id || 0;
+                          const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                          const pName = personDetails?.name || personDetails?.Name || "Secure Contact";
+                          const pImg = personDetails?.imageUrl || personDetails?.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl;
+                          const rStream = remoteStreams[Number(partnerId)];
+                          const isParticipantCameraEnabled = partner ? (partner.isCameraEnabled !== undefined ? partner.isCameraEnabled : (partner.IsCameraEnabled !== undefined ? partner.IsCameraEnabled : true)) : true;
+                          const showVideo = rStream && isParticipantCameraEnabled;
+                          const pStatus = partner ? (partner.status !== undefined ? partner.status : partner.Status) : 1;
+                          
+                          return showVideo ? (
+                            <video
+                              ref={(el) => {
+                                if (el && el.srcObject !== rStream) {
+                                  el.srcObject = rStream;
+                                }
+                              }}
+                              autoPlay
+                              playsInline
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex flex-col items-center text-center text-zinc-500 gap-4">
+                              <div className="w-20 h-20 bg-zinc-800 border-2 border-emerald-500/30 rounded-full flex items-center justify-center text-4xl font-black overflow-hidden shadow-2xl">
+                                {pImg ? (
+                                  <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
+                                ) : (
+                                  pName.charAt(0).toUpperCase()
+                                )}
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <p className="text-sm font-black text-white">{pName}</p>
+                                <span className="text-[10px] uppercase tracking-widest text-zinc-400 font-bold flex items-center justify-center gap-2">
+                                  {!isParticipantCameraEnabled ? (
+                                    "Camera Disabled"
+                                  ) : (
+                                    <>
+                                      <LoaderCircle className="animate-spin text-emerald-500" size={12} />
+                                      {pStatus === 0 || pStatus === "Ringing" ? "Calling..." : "Connecting stream..."}
+                                    </>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })()
+                      )}
+
+                    </div>
+                  ) : (
+                    /* Voice Call Layout: Multiple Users Card Grid */
+                    <div className="w-full max-w-md flex flex-col items-center justify-center gap-8 py-10 my-auto">
+                      {activeCall.isGroup || activeCall.IsGroup ? (
+                        <div className="w-full px-4 flex flex-col items-center gap-6">
+                          <div className="text-center flex flex-col items-center gap-2 bg-transparent border-none">
+                            <div className="w-16 h-16 bg-zinc-800 border border-zinc-700/50 rounded-full flex items-center justify-center shadow-lg overflow-hidden relative mb-1">
+                              {(() => {
+                                const chatRoom = localChatList.find(c => Number(c.id) === Number(activeCall.chatId || activeCall.ChatId));
+                                const chatImg = chatRoom?.imageUrl || chatRoom?.ImageUrl || activeCall.imageUrl || activeCall.ImageUrl;
+                                const displayName = chatRoom?.name || chatRoom?.Name || activeCall.groupName || activeCall.GroupName || "Secure Group Call";
+                                return chatImg ? (
+                                  <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Users size={28} className="text-indigo-400" />
+                                );
+                              })()}
+                            </div>
+                            <h2 className="text-xl font-black text-white tracking-tight">
+                              {(() => {
+                                const chatRoom = localChatList.find(c => Number(c.id) === Number(activeCall.chatId || activeCall.ChatId));
+                                return chatRoom?.name || chatRoom?.Name || activeCall.groupName || activeCall.GroupName || "Secure Group Call";
+                              })()}
+                            </h2>
+                            <span className="text-zinc-300 font-mono text-xs font-bold mt-0.5">
+                              {formatCallDuration(callDuration)}
+                            </span>
+                          </div>
+
+                          <div className="w-full grid grid-cols-2 gap-3.5 max-h-[360px] overflow-y-auto pr-1">
+                            {(activeCall.participants || []).filter((p: any) => {
+                              const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+                              const pStatus = p.status !== undefined ? p.status : p.Status;
+                              return pId === Number(currentUserId) || pStatus === 1 || pStatus === "Connected";
+                            }).map((p: any) => {
+                              const pId = p.personId || p.PersonId || p.id || p.Id;
+                              const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(pId));
+                              const pName = Number(pId) === Number(currentUserId) ? "You" : (personDetails?.name || personDetails?.Name || `User ${pId}`);
+                              const pImg = personDetails?.imageUrl || personDetails?.ImageUrl || p.profileImageUrl || p.ProfileImageUrl;
+                              const pStatus = p.status !== undefined ? p.status : p.Status;
+                              
+                              let statusText = "Ringing";
+                              let statusColor = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                              
+                              if (pStatus === 0 || pStatus === "Ringing") {
+                                statusText = "Calling";
+                                statusColor = "bg-amber-500/10 text-amber-400 border-amber-500/20";
+                              } else if (pStatus === 1 || pStatus === "Connected") {
+                                statusText = "Joined";
+                                statusColor = "bg-emerald-500/10 text-emerald-400 border-emerald-500/20";
+                              } else if (pStatus === 2 || pStatus === "Declined" || pStatus === "Rejected") {
+                                statusText = "Declined";
+                                statusColor = "bg-rose-500/10 text-rose-400 border-rose-500/20";
+                              } else if (pStatus === 3 || pStatus === "Left") {
+                                statusText = "Left";
+                                statusColor = "bg-zinc-500/10 text-zinc-400 border-zinc-500/20";
+                              } else if (pStatus === 4 || pStatus === "Missed") {
+                                statusText = "Missed";
+                                statusColor = "bg-orange-500/10 text-orange-400 border-orange-500/20";
+                              }
+
+                              const isParticipantMuted = Number(pId) === Number(currentUserId) 
+                                ? isMuted 
+                                : (p.isMuted !== undefined ? p.isMuted : p.IsMuted);
+
+                              const isParticipantSharing = Number(pId) === Number(currentUserId)
+                                ? isScreenSharing
+                                : (p.isSharing !== undefined ? p.isSharing : (p.IsSharing !== undefined ? p.IsSharing : false));
+
+                              return (
+                                <motion.div 
+                                  key={pId}
+                                  className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-3.5 flex flex-col items-center text-center gap-2.5 relative overflow-hidden backdrop-blur-md"
+                                  whileHover={{ scale: 1.02 }}
+                                >
+                                  {/* Screen Share Status Overlay */}
+                                  {isParticipantSharing && (
+                                    <div className="absolute top-2 left-2 z-10">
+                                      <span className="p-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center animate-bounce" title="Sharing Screen">
+                                        <Monitor size={10} />
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {/* Microphone Status Icon Overlay */}
+                                  <div className="absolute top-2 right-2 z-10">
+                                    {isParticipantMuted ? (
+                                      <span className="p-1 rounded-full bg-rose-500/20 border border-rose-500/30 text-rose-400 flex items-center justify-center" title="Muted">
+                                        <MicOff size={10} />
+                                      </span>
+                                    ) : (
+                                      <span className="p-1 rounded-full bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center animate-pulse" title="Active">
+                                        <Mic size={10} />
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  <div className="w-14 h-14 bg-zinc-800 border border-zinc-700 rounded-full flex items-center justify-center text-lg font-black overflow-hidden relative">
+                                    {pImg ? (
+                                      <img src={getImageUrl(pImg)} alt={pName} className="w-full h-full object-cover" />
+                                    ) : (
+                                      pName.charAt(0).toUpperCase()
+                                    )}
+                                    {(pStatus === 1 || pStatus === "Connected") && (
+                                      <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-zinc-900 rounded-full animate-pulse" />
+                                    )}
+                                  </div>
+                                  
+                                  <div className="min-w-0 w-full">
+                                    <p className="text-xs font-bold text-white truncate leading-tight">{pName}</p>
+                                    <span className={`inline-block text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border ${statusColor} mt-1`}>
+                                      {statusText}
+                                    </span>
+                                  </div>
+
+                                  {/* Audio Wave Animation */}
+                                  {isParticipantMuted ? (
+                                    <div className="flex gap-0.5 items-center justify-center h-4 mt-1 opacity-40">
+                                      <span className="text-[9px] uppercase tracking-wider font-extrabold text-rose-400">Muted</span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex gap-0.5 items-end justify-center h-4 mt-1">
+                                      {[1, 2, 3, 4, 5].map((idx) => {
+                                        let hVal = 4;
+                                        if (Number(pId) === Number(currentUserId)) {
+                                          const val = audioAnalyserData[idx % audioAnalyserData.length] || 15;
+                                          hVal = Math.max(4, Math.min(16, val / 4));
+                                        } else {
+                                          const levels = remoteAudioLevels[pId];
+                                          hVal = levels ? (levels[(idx - 1) % levels.length] || 4) : 4;
+                                        }
+                                        return (
+                                          <motion.div
+                                            key={idx}
+                                            className="w-0.75 bg-emerald-400 rounded-full"
+                                            animate={{
+                                              height: [4, hVal, 4],
+                                            }}
+                                            transition={{
+                                              duration: 0.15,
+                                              ease: "easeInOut"
+                                            }}
+                                            style={{ height: 4 }}
+                                          />
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center">
+                          <div className="relative mb-6">
+                            {/* Animated rings reflecting talking activity */}
+                            <motion.div
+                              animate={{ scale: [1, 1.25, 1], opacity: [0.4, 0.1, 0.4] }}
+                              transition={{ duration: 2, repeat: Infinity }}
+                              className="absolute inset-0 bg-emerald-500/20 rounded-full"
+                            />
+                            <motion.div
+                              animate={{ scale: [1, 1.45, 1], opacity: [0.3, 0.05, 0.3] }}
+                              transition={{ duration: 2, delay: 0.5, repeat: Infinity }}
+                              className="absolute inset-0 bg-emerald-500/10 rounded-full"
+                            />
+                            <div className="w-28 h-28 bg-zinc-800 border border-emerald-500 rounded-full flex items-center justify-center text-4xl font-black shadow-2xl overflow-hidden">
+                              {(() => {
+                                const partner = activeCall.participants?.find((p: any) => {
+                                  const pId = p.personId || p.PersonId || p.id || p.Id;
+                                  return Number(pId) !== Number(currentUserId);
+                                });
+                                const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                                const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                                const partnerImg = activeCall.imageUrl || activeCall.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                                const partnerName = personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                                return partnerImg ? (
+                                  <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                                ) : (
+                                  partnerName.charAt(0).toUpperCase()
+                                );
+                              })()}
+                            </div>
+                          </div>
+                          <h2 className="text-xl font-extrabold tracking-wide text-white">
+                            {(() => {
+                              const partner = activeCall.participants?.find((p: any) => {
+                                const pId = p.personId || p.PersonId || p.id || p.Id;
+                                return Number(pId) !== Number(currentUserId);
+                              });
+                              const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                              const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                              return personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                            })()}
+                          </h2>
+
+                          {/* Screen share badge for direct voice call */}
+                          {(() => {
+                            const partner = activeCall.participants?.find((p: any) => {
+                              const pId = p.personId || p.PersonId || p.id || p.Id;
+                              return Number(pId) !== Number(currentUserId);
+                            });
+                            const isPartnerSharing = partner ? (partner.isSharing !== undefined ? partner.isSharing : (partner.IsSharing !== undefined ? partner.IsSharing : false)) : false;
+                            if (isPartnerSharing) {
+                              return (
+                                <span className="mt-2.5 inline-flex items-center gap-1.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                                  <Monitor size={11} />
+                                  Sharing Screen
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                          
+                          {/* Elegant duration timer */}
+                          <span className="text-zinc-400 font-mono text-sm mt-1">
+                            {formatCallDuration(callDuration)}
+                          </span>
+
+                          {/* Animated Audio Flex Bar Waves */}
+                          <div className="flex items-end gap-1.5 h-10 justify-center mt-6">
+                            {[1, 2, 3, 4, 5, 6, 7, 8].map((bar) => (
+                              <motion.div
+                                key={bar}
+                                className="w-1 bg-emerald-500 rounded-full"
+                                animate={{
+                                  height: [10, 36, 14, 42, 10][bar % 5],
+                                }}
+                                transition={{
+                                  duration: 0.6 + (bar * 0.1) % 0.4,
+                                  repeat: Infinity,
+                                  repeatType: "reverse",
+                                  ease: "easeInOut",
+                                }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Hidden audio players for all remote streams to ensure voice audio plays during voice calls */}
+                  {Object.entries(remoteStreams).map(([pIdStr, stream]) => {
+                    const pId = Number(pIdStr);
+                    if (pId === Number(currentUserId)) return null;
+                    return (
+                      <audio
+                        key={pId}
+                        ref={(el) => {
+                          if (el) {
+                            if (el.srcObject !== stream) {
+                              el.srcObject = stream;
+                            }
+                            el.muted = isSpeakerMuted;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                      />
+                    );
+                  })}
+
+                  {/* Local Video Picture-in-Picture */}
+                  {isCameraEnabled && localStream && (activeCall.type === 2 || activeCall.Type === 2) && (
+                    <motion.div
+                      drag
+                      dragConstraints={{ left: -150, right: 150, top: -250, bottom: 250 }}
+                      className="absolute top-20 right-4 w-32 h-44 bg-zinc-900 border-2 border-white/20 rounded-xl shadow-2xl overflow-hidden z-[200] cursor-grab active:cursor-grabbing"
+                    >
+                      <video
+                        ref={(el) => {
+                          localVideoRef.current = el;
+                          if (el && el.srcObject !== localStream) {
+                            el.srcObject = localStream;
+                          }
+                        }}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="w-full h-full object-cover scale-x-[-1]"
+                      />
+                      <span className="absolute bottom-1.5 left-1.5 bg-black/60 px-1.5 py-0.5 rounded text-[8px] font-bold text-white tracking-wide">
+                        You
+                      </span>
+                    </motion.div>
+                  )}
+
+                </div>
+              )}
+
+            </div>
+
+            {/* CONTROLS OVERLAY AREA */}
+            <div className="p-10 pb-16 flex flex-col items-center gap-6 z-10 bg-gradient-to-t from-black/90 via-black/40 to-transparent">
+              
+              <div className="flex items-center gap-6 justify-center">
+                
+                {/* Outgoing Ringing controls */}
+                {callState === 'ringing_outgoing' && (
+                  <>
+                    {/* Speaker simulation */}
+                    <button
+                      onClick={() => {
+                        const nextVal = !isSpeakerMuted;
+                        setIsSpeakerMuted(nextVal);
+                        triggerToast(nextVal ? "Call Volume Muted" : "Speaker Volume Unmuted");
+                      }}
+                      className={`p-4 rounded-full transition-all border border-zinc-700/50 ${isSpeakerMuted ? 'bg-zinc-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-white'}`}
+                      title={isSpeakerMuted ? "Unmute Speaker" : "Mute Speaker"}
+                    >
+                      {isSpeakerMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
+                    </button>
+                    {/* End Call / Cancel */}
+                    <button
+                      onClick={handleEndCall}
+                      className="p-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-2xl transition-all border border-rose-500 transform hover:scale-105 active:scale-95"
+                    >
+                      <Phone size={24} className="rotate-[135deg]" />
+                    </button>
+                    {/* Mic mute */}
+                    <button
+                      onClick={handleToggleMic}
+                      className={`p-4 rounded-full transition-all border border-zinc-700/50 ${isMuted ? 'bg-zinc-600 text-white' : 'bg-zinc-800 hover:bg-zinc-700 text-white'}`}
+                    >
+                      {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                    </button>
+                  </>
+                )}
+
+                {/* Incoming Ringing controls */}
+                {callState === 'ringing_incoming' && (
+                  <div className="flex gap-12">
+                    {/* Reject button */}
+                    <button
+                      onClick={handleRejectCall}
+                      className="flex flex-col items-center gap-2"
+                    >
+                      <div className="p-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-2xl transition-all border border-rose-500 transform hover:scale-105 active:scale-95">
+                        <Phone size={24} className="rotate-[135deg]" />
+                      </div>
+                      <span className="text-[10px] font-black uppercase tracking-widest text-rose-500">Decline</span>
+                    </button>
+
+                    {/* Accept button */}
+                    {Number(activeCall?.callerPersonId || activeCall?.CallerPersonId) !== Number(currentUserId) && (
+                      <button
+                        onClick={handleAcceptCall}
+                        className="flex flex-col items-center gap-2"
+                      >
+                        <div className="p-5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full shadow-2xl transition-all border border-emerald-400 transform hover:scale-110 active:scale-95 animate-bounce">
+                          <Phone size={24} />
+                        </div>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Accept</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Connected active controls */}
+                {callState === 'connected' && (
+                  <>
+                    {/* Toggle Camera */}
+                    {(activeCall.type === 2 || activeCall.Type === 2) && (
+                      <button
+                        onClick={handleToggleCamera}
+                        className={`p-4 rounded-full transition-all border border-zinc-700/50 ${isCameraEnabled ? 'bg-zinc-800 hover:bg-zinc-700 text-white' : 'bg-zinc-600 text-white'}`}
+                        title={isCameraEnabled ? 'Disable Camera' : 'Enable Camera'}
+                      >
+                        {isCameraEnabled ? <Video size={20} /> : <VideoOff size={20} />}
+                      </button>
+                    )}
+
+                    {/* Toggle Microphone */}
+                    <button
+                      onClick={handleToggleMic}
+                      className={`p-4 rounded-full transition-all border border-zinc-700/50 ${isMuted ? 'bg-rose-600 text-white border-rose-500 shadow-[0_0_15px_rgba(225,29,72,0.3)]' : 'bg-zinc-800 hover:bg-zinc-700 text-white'}`}
+                      title={isMuted ? 'Unmute Mic' : 'Mute Mic'}
+                    >
+                      {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                    </button>
+
+                    {/* Toggle Screen Share */}
+                    <button
+                      onClick={handleToggleScreenShare}
+                      className={`p-4 rounded-full transition-all border border-zinc-700/50 ${isScreenSharing ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-zinc-800 hover:bg-zinc-700 text-white'}`}
+                      title={isScreenSharing ? 'Stop Presenting' : 'Present Screen'}
+                    >
+                      <Monitor size={20} className={isScreenSharing ? "animate-pulse" : ""} />
+                    </button>
+
+                    {/* End Call / Leave Call */}
+                    {(() => {
+                      const initiatorId = Number(activeCall.callerPersonId || activeCall.CallerPersonId);
+                      const isInitiator = initiatorId === Number(currentUserId);
+                      
+                      return (
+                        <button
+                          onClick={handleEndCall}
+                          className="p-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full shadow-2xl transition-all border border-rose-500 transform hover:scale-105 active:scale-95"
+                          title={isInitiator ? "End Call (For All)" : "Leave Call"}
+                        >
+                          <Phone size={24} className="rotate-[135deg]" />
+                        </button>
+                      );
+                    })()}
+
+                    {/* Loudspeaker */}
+                    <button
+                      onClick={() => {
+                        const nextVal = !isSpeakerMuted;
+                        setIsSpeakerMuted(nextVal);
+                        triggerToast(nextVal ? "Loudspeaker Off (Muted)" : "Loudspeaker On");
+                      }}
+                      className={`p-4 rounded-full transition-all border border-zinc-700/50 ${!isSpeakerMuted ? 'bg-emerald-600 border-emerald-500 text-white shadow-[0_0_15px_rgba(16,185,129,0.3)]' : 'bg-zinc-800 hover:bg-zinc-700 text-white'}`}
+                      title={!isSpeakerMuted ? "Disable Loudspeaker" : "Enable Loudspeaker"}
+                    >
+                      {!isSpeakerMuted ? <Volume2 size={20} /> : <VolumeX size={20} />}
+                    </button>
+                  </>
+                )}
+
+              </div>
+            </div>
+
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Minimized Call Button */}
+      <AnimatePresence>
+        {callState !== 'idle' && activeCall && isCallMinimized && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.8, y: 50 }}
+            onClick={() => {
+              triggerHaptic('light');
+              setIsCallMinimized(false);
+            }}
+            className="fixed bottom-6 right-6 z-[270] bg-zinc-950/95 backdrop-blur-md text-white p-3.5 rounded-2xl shadow-2xl border-2 border-emerald-500 cursor-pointer flex items-center gap-3.5 hover:bg-zinc-900 transition-all select-none group"
+            style={{ touchAction: 'none' }}
+          >
+            {/* Pulsing indicator */}
+            <div className="relative shrink-0">
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></span>
+              <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-500 rounded-full"></span>
+              <div className="w-10 h-10 rounded-xl bg-zinc-850 flex items-center justify-center font-bold text-sm overflow-hidden border border-zinc-800">
+                {(() => {
+                  if (activeCall.isGroup || activeCall.IsGroup) {
+                    const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                    const chatImg = foundChat?.imageUrl || foundChat?.ImageUrl || activeCall.imageUrl || activeCall.ImageUrl;
+                    const displayName = foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                    return chatImg ? (
+                      <img src={getImageUrl(chatImg)} alt={displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      <Users size={16} className="text-emerald-400" />
+                    );
+                  } else {
+                    const partner = activeCall.participants?.find((p: any) => {
+                      const pId = p.personId || p.PersonId || p.id || p.Id;
+                      return Number(pId) !== Number(currentUserId);
+                    });
+                    const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                    const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                    const partnerImg = activeCall.imageUrl || activeCall.ImageUrl || partner?.profileImageUrl || partner?.ProfileImageUrl || personDetails?.imageUrl || personDetails?.ImageUrl;
+                    const partnerName = personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                    return partnerImg ? (
+                      <img src={getImageUrl(partnerImg)} alt={partnerName} className="w-full h-full object-cover" />
+                    ) : (
+                      partnerName.charAt(0).toUpperCase()
+                    );
+                  }
+                })()}
+              </div>
+            </div>
+            
+            <div className="flex flex-col pr-1 min-w-[100px]">
+              <span className="text-[9px] font-black uppercase tracking-wider text-emerald-400">
+                {callState === 'connected' ? 'Active Call' : 'Ringing...'}
+              </span>
+              <span className="text-xs font-bold text-zinc-100 max-w-[120px] truncate leading-tight">
+                {(() => {
+                  if (activeCall.isGroup || activeCall.IsGroup) {
+                    const foundChat = localChatList.find(c => String(c.id) === String(activeCall.chatId || activeCall.ChatId));
+                    return foundChat?.name || activeCall.chatName || activeCall.ChatName || 'Secure Group';
+                  } else {
+                    const partner = activeCall.participants?.find((p: any) => {
+                      const pId = p.personId || p.PersonId || p.id || p.Id;
+                      return Number(pId) !== Number(currentUserId);
+                    });
+                    const partnerId = partner?.personId || partner?.PersonId || partner?.id || partner?.Id;
+                    const personDetails = availablePersons.find(ap => Number(ap.id || ap.Id) === Number(partnerId));
+                    return personDetails?.name || personDetails?.Name || activeChat?.name || "Secure Contact";
+                  }
+                })()}
+              </span>
+              {callState === 'connected' && (
+                <span className="text-[10px] font-mono text-zinc-400 mt-0.5 leading-none">
+                  {formatCallDuration(callDuration)}
+                </span>
+              )}
+            </div>
+            
+            <div className="w-8 h-8 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center group-hover:bg-emerald-500 group-hover:text-white transition-all shrink-0">
+              {activeCall.type === 2 || activeCall.Type === 2 ? <Video size={14} /> : <Phone size={14} />}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Camera and Microphone Permission Modal */}
+      <AnimatePresence>
+        {showCameraPermissionModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[280] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 text-white rounded-3xl w-full max-w-sm overflow-hidden shadow-2xl p-6 relative flex flex-col items-center text-center"
+            >
+              {/* WhatsApp-style Camera Badge Icon */}
+              <div className="relative mb-6">
+                <div className="absolute inset-0 bg-emerald-500/20 rounded-full blur-xl animate-pulse" />
+                <div className="w-16 h-16 bg-zinc-800 border-2 border-emerald-500 rounded-full flex items-center justify-center text-emerald-400 shadow-lg relative">
+                  <Camera size={28} className="animate-pulse" />
+                </div>
+              </div>
+
+              <h3 className="text-lg font-black tracking-wide uppercase text-zinc-100 mb-2">
+                Camera Access Required
+              </h3>
+              
+              <p className="text-zinc-400 text-xs leading-relaxed max-w-xs mb-6 font-medium">
+                HanssonHub requires access to your camera and microphone to start high-fidelity, end-to-end encrypted video calls just like in WhatsApp.
+              </p>
+
+              {/* Secure tag */}
+              <div className="flex items-center gap-1.5 bg-zinc-800 px-3 py-1.5 rounded-full border border-zinc-700/50 mb-6">
+                <Lock size={12} className="text-emerald-500" />
+                <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-300">Privacy Secured</span>
+              </div>
+
+              <div className="flex w-full gap-3">
+                <button
+                  onClick={() => {
+                    triggerHaptic('light');
+                    setShowCameraPermissionModal(false);
+                    setPendingCallType(null);
+                  }}
+                  className="flex-1 py-3 bg-zinc-800 hover:bg-zinc-750 active:scale-95 text-zinc-400 hover:text-zinc-200 text-xs font-black uppercase tracking-wider rounded-xl transition-all border border-zinc-700 cursor-pointer"
+                >
+                  Deny
+                </button>
+                <button
+                  onClick={async () => {
+                    triggerHaptic('medium');
+                    setShowCameraPermissionModal(false);
+                    
+                    // Request actual browser permissions
+                    try {
+                      const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true,
+                        video: { width: 640, height: 480, facingMode: 'user' }
+                      });
+                      
+                      // Stop the tracks immediately because startLocalStream will request and bind them
+                      stream.getTracks().forEach(t => t.stop());
+                      
+                      // Proceed with the call
+                      if (pendingCallType) {
+                        proceedWithStartCall(pendingCallType);
+                        setPendingCallType(null);
+                      } else {
+                        proceedWithAcceptCall();
+                      }
+                    } catch (err) {
+                      console.warn("User denied camera access inside browser prompt", err);
+                      triggerToast("Camera access was denied");
+                      setPendingCallType(null);
+                    }
+                  }}
+                  className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white text-xs font-black uppercase tracking-wider rounded-xl shadow-lg shadow-emerald-500/20 transition-all border border-emerald-400 cursor-pointer"
+                >
+                  Allow Access
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </div>
   );

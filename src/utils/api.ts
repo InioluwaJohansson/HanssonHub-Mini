@@ -398,6 +398,33 @@ export const activateDeactivateAction = async (id: number) => {
   return response.data;
 };
 
+export const startCall = async (chatId: number, type: number) => {
+  const response = await api.post('/Call/StartCall', { chatId, type });
+  return response.data;
+};
+
+export const endCall = async (callId: number) => {
+  const response = await api.post(`/Call/EndCall?callId=${callId}`, '');
+  return response.data;
+};
+
+export const acceptCall = async (callId: number) => {
+  const response = await api.post(`/Call/AcceptCall?callId=${callId}`, '');
+  return response.data;
+};
+
+export const rejectCall = async (callId: number) => {
+  const response = await api.post(`/Call/RejectCall?callId=${callId}`, '');
+  return response.data;
+};
+
+export const getCallLogs = async (page: number = 1, pageSize: number = 50) => {
+  const response = await api.get(`/Call/GetCallLogs`, {
+    params: { page, pageSize }
+  });
+  return response.data;
+};
+
 export const getImageUrl = (img?: string) => {
   if (!img) return undefined;
   if (img.startsWith('data:') || img.startsWith('http://') || img.startsWith('https://')) return img;

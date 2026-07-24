@@ -125,3 +125,37 @@ export interface MessageQueryDto {
   page: number;
   pageSize: number;
 }
+
+export enum CallStatus {
+  Ringing = 1,
+  Connected = 2,
+  Ended = 3,
+  Missed = 4,
+  Rejected = 5
+}
+
+export enum CallParticipantStatus {
+  Ringing = 0,
+  Connected = 1,
+  Declined = 2,
+  Left = 3,
+  Missed = 4
+}
+
+export interface CallParticipantDto {
+  personId: number;
+  status: CallParticipantStatus;
+  joinedAt?: string | Date;
+  leftAt?: string | Date;
+}
+
+export interface CallDto {
+  id: number;
+  chatId: number;
+  callerPersonId: number;
+  type: number; // 1 = Audio, 2 = Video
+  status: CallStatus;
+  startedAt: string | Date;
+  endedAt?: string | Date;
+  participants: CallParticipantDto[];
+}

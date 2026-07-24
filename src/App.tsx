@@ -647,11 +647,18 @@ export default function App() {
                     {currentView === 'doors' && <Doors key={`door-${refreshKey}`} />}
                     {currentView === 'actions' && <Actions key={`action-${refreshKey}`} />}
                     {currentView === 'cameras' && <Cameras key={`cam-${refreshKey}`} />}
-                    {currentView === 'chats' && <div key={`chat-${refreshKey}`} className="contents"><Chats onChatActive={(active) => setNavHidden(active)} onRefreshPage={() => setRefreshKey(prev => prev + 1)} /></div>}
+                    {currentView === 'chats' && <div key={`chat-${refreshKey}`} className="contents"></div>}
                     {currentView === 'logs' && <Logs key={`log-${refreshKey}`} />}
                     {currentView === 'settings' && <Settings key={`set-${refreshKey}`} onBack={previousView ? () => changeViewWithTransition(previousView) : undefined} />}
                   </motion.div>
                 </AnimatePresence>
+
+                <Chats 
+                  onChatActive={(active) => setNavHidden(active)} 
+                  onRefreshPage={() => setRefreshKey(prev => prev + 1)} 
+                  isViewActive={currentView === 'chats'} 
+                  onNavigateToChats={() => changeViewWithTransition('chats')}
+                />
               </main>
               
               {!navHidden && <BottomNav currentView={currentView} setView={changeViewWithTransition} />}

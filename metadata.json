@@ -1,6 +1,6 @@
 {
   "name": "HanssonHub",
   "description": "Mobile security hub for monitoring doors, cameras, and chats.",
-  "requestFramePermissions": ["publickey-credentials-create", "publickey-credentials-get", "microphone"],
+  "requestFramePermissions": ["publickey-credentials-create", "publickey-credentials-get", "microphone", "camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -18,6 +18,12 @@ export interface CameraData {
   name: string;
   imgUrl: string;
   streamUrl?: string;
+  cameraId?: string;
+  ipAddress?: string;
+  username?: string | null;
+  streamPath?: string;
+  port?: number;
+  recordings?: any[];
 }
 
 export interface Step {
@@ -89,6 +95,19 @@ const isMatchingDoor = (d: any) => {
   return false;
 };
 
+const buildFullUrl = (url: string | undefined | null) => {
+  if (!url) return '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed;
+  }
+  const baseUrl = "https://kv5zhpcr-7190.uks1.devtunnels.ms/storage/";
+  if (trimmed.startsWith('/')) {
+    return `${baseUrl}${trimmed.substring(1)}`;
+  }
+  return `${baseUrl}${trimmed}`;
+};
+
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -137,12 +156,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Parse cameras
       const camerasData = camerasRes?.data ?? camerasRes?.Data ?? camerasRes ?? [];
-      const mappedCameras = camerasData.map((c: any, index: number) => ({
-        id: String(c.id ?? c.Id ?? index),
-        name: c.name ?? c.Name ?? `Camera ${c.id ?? c.Id ?? index}`,
-        imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop',
-        streamUrl: c.hlsUrl ?? c.HlsUrl ?? c.streamUrl ?? c.StreamUrl ?? c.videoUrl ?? c.VideoUrl ?? c.imgUrl ?? c.ImgUrl
-      }));
+      const mappedCameras = camerasData.map((c: any, index: number) => {
+        const rawStream = c.liveStreamUrl ?? c.LiveStreamUrl ?? c.hlsUrl ?? c.HlsUrl ?? c.streamUrl ?? c.StreamUrl ?? c.videoUrl ?? c.VideoUrl ?? c.imgUrl ?? c.ImgUrl;
+        return {
+          id: String(c.id ?? c.Id ?? index),
+          name: c.cameraName ?? c.CameraName ?? c.name ?? c.Name ?? `Camera ${c.id ?? c.Id ?? index}`,
+          imgUrl: c.imgUrl ?? c.ImgUrl ?? c.imageUrl ?? c.ImageUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop',
+          streamUrl: buildFullUrl(rawStream),
+          cameraId: c.cameraId ?? c.CameraId ?? '',
+          ipAddress: c.ipAddress ?? c.IpAddress ?? '',
+          username: c.username ?? c.Username ?? null,
+          streamPath: c.streamPath ?? c.StreamPath ?? '',
+          port: c.port ?? c.Port ?? 0,
+          recordings: c.recordings ?? c.Recordings ?? []
+        };
+      });
       setCameras(mappedCameras);
       Promise.all(mappedCameras.map((cam: CameraData) => saveData(STORES.CAMERAS, cam))).catch(e => console.warn('Cam cache save failed:', e));
 
@@ -252,11 +280,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const handleCameraCreated = (data: any) => {
        setCameras(prev => {
-          const newCam = {
+          const rawStream = data.liveStreamUrl ?? data.LiveStreamUrl;
+          const newCam: CameraData = {
             id: String(data.id ?? data.Id),
-            name: data.cameraName ?? data.CameraName,
+            name: data.cameraName ?? data.CameraName ?? data.name ?? data.Name ?? `Camera ${data.id ?? data.Id}`,
             imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? 'https://images.unsplash.com/photo-1558002038-1055907df827?q=80&w=1470&auto=format&fit=crop',
-            streamUrl: data.liveStreamUrl ?? data.LiveStreamUrl
+            streamUrl: buildFullUrl(rawStream),
+            cameraId: data.cameraId ?? data.CameraId ?? '',
+            ipAddress: data.ipAddress ?? data.IpAddress ?? '',
+            username: data.username ?? data.Username ?? null,
+            streamPath: data.streamPath ?? data.StreamPath ?? '',
+            port: data.port ?? data.Port ?? 0,
+            recordings: data.recordings ?? data.Recordings ?? []
           };
           if (prev.find(c => c.id === newCam.id)) return prev;
           return [newCam, ...prev];
@@ -264,16 +299,63 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     const handleCameraUpdated = (data: any) => {
-       setCameras(prev => prev.map(c => String(c.id) === String(data.id ?? data.Id) ? {
-          ...c,
-          name: data.cameraName ?? data.CameraName ?? c.name,
-          imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? c.imgUrl,
-          streamUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? c.streamUrl
-       } : c));
+       setCameras(prev => prev.map(c => {
+         if (String(c.id) === String(data.id ?? data.Id)) {
+           const rawStream = data.liveStreamUrl ?? data.LiveStreamUrl ?? c.streamUrl;
+           return {
+             ...c,
+             name: data.cameraName ?? data.CameraName ?? data.name ?? data.Name ?? c.name,
+             imgUrl: data.liveStreamUrl ?? data.LiveStreamUrl ?? c.imgUrl,
+             streamUrl: buildFullUrl(rawStream),
+             cameraId: data.cameraId ?? data.CameraId ?? c.cameraId,
+             ipAddress: data.ipAddress ?? data.IpAddress ?? c.ipAddress,
+             username: data.username ?? data.Username ?? c.username,
+             streamPath: data.streamPath ?? data.StreamPath ?? c.streamPath,
+             port: data.port ?? data.Port ?? c.port,
+             recordings: data.recordings ?? data.Recordings ?? c.recordings
+           };
+         }
+         return c;
+       }));
     };
 
     const handleCameraDeleted = (data: any) => {
        setCameras(prev => prev.filter(c => String(c.id) !== String(data.id ?? data.Id)));
+    };
+
+    const handleNewRecording = (data: any) => {
+       if (!data) return;
+       const targetCameraId = data.cameraId ?? data.CameraId;
+       if (!targetCameraId) return;
+
+       setCameras(prev => {
+         return prev.map(c => {
+           const matchByCameraId = c.cameraId && String(c.cameraId).toLowerCase() === String(targetCameraId).toLowerCase();
+           const matchById = String(c.id) === String(targetCameraId);
+           
+           if (matchByCameraId || matchById) {
+             const existingRecordings = c.recordings ?? [];
+             const filePath = data.filePath ?? data.FilePath;
+             const fileName = data.fileName ?? data.FileName;
+             
+             const alreadyExists = existingRecordings.some((r: any) => {
+               const rPath = r.filePath ?? r.FilePath ?? r.recordingPath ?? r.RecordingPath ?? '';
+               const rName = r.fileName ?? r.FileName ?? '';
+               return (filePath && rPath === filePath) || (fileName && rName === fileName);
+             });
+             
+             if (alreadyExists) return c;
+
+             const updatedCam = {
+               ...c,
+               recordings: [data, ...existingRecordings]
+             };
+             saveData(STORES.CAMERAS, updatedCam).catch(e => console.warn('Cache update on new recording failed:', e));
+             return updatedCam;
+           }
+           return c;
+         });
+       });
     };
 
     const handleActionCreated = () => {
@@ -335,6 +417,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     homeSecurityHubConnection.on("CameraCreated", handleCameraCreated);
     homeSecurityHubConnection.on("CameraUpdated", handleCameraUpdated);
     homeSecurityHubConnection.on("CameraDeleted", handleCameraDeleted);
+    homeSecurityHubConnection.on("NewRecording", handleNewRecording);
     homeSecurityHubConnection.on("ActionCreated", handleActionCreated);
     homeSecurityHubConnection.on("ActionUpdated", handleActionUpdated);
     homeSecurityHubConnection.on("ActionActivationChanged", handleActionActivationChanged);
@@ -349,6 +432,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       homeSecurityHubConnection.off("CameraCreated", handleCameraCreated);
       homeSecurityHubConnection.off("CameraUpdated", handleCameraUpdated);
       homeSecurityHubConnection.off("CameraDeleted", handleCameraDeleted);
+      homeSecurityHubConnection.off("NewRecording", handleNewRecording);
       homeSecurityHubConnection.off("ActionCreated", handleActionCreated);
       homeSecurityHubConnection.off("ActionUpdated", handleActionUpdated);
       homeSecurityHubConnection.off("ActionActivationChanged", handleActionActivationChanged);
