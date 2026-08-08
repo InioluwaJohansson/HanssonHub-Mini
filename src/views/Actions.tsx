@@ -3,6 +3,7 @@ import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, S
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllActions, activateDeactivateAction } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
+import { triggerHaptic } from '../utils/haptics';
 
 import { useData, ActionData } from '../context/DataContext';
 
@@ -84,6 +85,7 @@ export default function Actions() {
     const actionId = action.id ?? action.Id;
     if (!actionId || togglingId !== null) return;
 
+    triggerHaptic('medium');
     setTogglingId(actionId);
     try {
       await activateDeactivateAction(actionId);

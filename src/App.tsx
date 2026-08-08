@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import Splash from './components/Splash';
 import Login from './components/Login';
@@ -14,7 +14,7 @@ import Settings from './views/Settings';
 import { startHomeSecurityHub, homeSecurityHubConnection, rebuildHubConnections } from './utils/signalr';
 import { LoaderCircle } from 'lucide-react';
 import { refreshLoginToken, saveAppNamesList, getStoredAppNamesList, saveToken } from './utils/api';
-import { playNotificationSound } from './utils/audio';
+import { playNotificationSound, stopAllSounds } from './utils/audio';
 import { clearAllStores, clearStore, STORES } from './utils/db';
 
 import Logs from './views/Logs';
@@ -24,7 +24,7 @@ import { useData } from './context/DataContext';
 type AppState = 'splash' | 'login' | 'auth' | 'app';
 
 export default function App() {
-  const { clearLogs } = useLogs();
+  const { clearLogs, fetchLogs } = useLogs();
   const { refreshData } = useData();
   const [appState, setAppState] = useState<AppState>(() => {
     const token = localStorage.getItem('auth_token');
@@ -47,6 +47,7 @@ export default function App() {
   });
   const [isPulling, setIsPulling] = useState(false);
   const scrollRef = useRef<HTMLElement>(null);
+  const handleLogoutRef = useRef<() => void>(() => {});
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [pullDistance, setPullDistance] = useState(0);
@@ -272,14 +273,47 @@ export default function App() {
       }
     };
 
+    const handleHighLevelLogOut = (data?: any) => {
+      console.log("[HOME_SIGNALR_EVENT: HighLevelLogOut]", data);
+      handleLogoutRef.current();
+    };
+
+    const handleLogOut = (personId?: any) => {
+      console.log("[HOME_SIGNALR_EVENT: LogOut]", personId);
+      try {
+        const stored = localStorage.getItem('user_details');
+        if (stored) {
+          let userObj = JSON.parse(stored);
+          const myId = userObj?.id || userObj?.Id || userObj?.personId || userObj?.PersonId || userObj?.person_id;
+          
+          if (personId !== undefined && personId !== null && personId !== '' && myId) {
+            if (String(myId) === String(personId)) {
+              handleLogoutRef.current();
+            }
+          } else {
+            handleLogoutRef.current();
+          }
+        } else {
+          handleLogoutRef.current();
+        }
+      } catch (err) {
+        console.error("Error handling LogOut SignalR event:", err);
+        handleLogoutRef.current();
+      }
+    };
+
     homeSecurityHubConnection.on("MessageSent", handleReceivedMessage);
     homeSecurityHubConnection.on("ReceiveMessage", handleReceivedMessage);
     homeSecurityHubConnection.on("GetAppNamesDetails", handleGetAppNamesDetails);
+    homeSecurityHubConnection.on("HighLevelLogOut", handleHighLevelLogOut);
+    homeSecurityHubConnection.on("LogOut", handleLogOut);
     
     return () => {
       homeSecurityHubConnection.off("MessageSent", handleReceivedMessage);
       homeSecurityHubConnection.off("ReceiveMessage", handleReceivedMessage);
       homeSecurityHubConnection.off("GetAppNamesDetails", handleGetAppNamesDetails);
+      homeSecurityHubConnection.off("HighLevelLogOut", handleHighLevelLogOut);
+      homeSecurityHubConnection.off("LogOut", handleLogOut);
     };
   }, []);
 
@@ -469,6 +503,42 @@ export default function App() {
     setCurrentView(newView);
   };
 
+  const fetchAllPostLoginData = useCallback(async () => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) return;
+
+    console.log("[AutoFetch] Automatically fetching doors, cameras, actions, chats, and logs after login...");
+    
+    // Fetch doors, cameras, actions
+    try {
+      await refreshData();
+    } catch (err) {
+      console.warn("[AutoFetch] Failed to fetch doors/cameras/actions:", err);
+    }
+
+    // Fetch logs
+    try {
+      await fetchLogs(true);
+    } catch (err) {
+      console.warn("[AutoFetch] Failed to fetch logs:", err);
+    }
+
+    // Fetch chats
+    try {
+      if (typeof (window as any).__fetchChatsRef === 'function') {
+        await (window as any).__fetchChatsRef();
+      }
+    } catch (err) {
+      console.warn("[AutoFetch] Failed to fetch chats:", err);
+    }
+  }, [refreshData, fetchLogs]);
+
+  useEffect(() => {
+    if (appState === 'app') {
+      fetchAllPostLoginData();
+    }
+  }, [appState, authVerified, fetchAllPostLoginData]);
+
   const handleLoginSuccess = () => {
     setAppStateWithTransition('auth', 1);
   };
@@ -477,10 +547,15 @@ export default function App() {
     setAuthVerified(true);
     rebuildHubConnections().catch(err => console.warn("Failed to rebuild hubs on auth success:", err));
     setAppStateWithTransition('app', 1);
+    setTimeout(() => {
+      fetchAllPostLoginData();
+    }, 100);
   };
 
   const handleAuthFailMax = () => {
     setAuthVerified(false);
+    clearLogs();
+    stopAllSounds();
     clearAllStores().catch(err => console.warn("Failed to clear DB on auth fail:", err));
     localStorage.removeItem('auth_verified');
     localStorage.removeItem('app_state');
@@ -493,15 +568,25 @@ export default function App() {
 
   const handleLogout = () => {
     setAuthVerified(false);
+    clearLogs();
+    stopAllSounds();
     clearAllStores().catch(err => console.warn("Failed to clear DB on logout:", err));
     localStorage.removeItem('auth_verified');
     localStorage.removeItem('app_state');
     localStorage.removeItem('auth_token');
     localStorage.removeItem('user_details');
     localStorage.removeItem('app_names_list');
-    // await connection.invoke("LeaveChat", chatId);
+    localStorage.removeItem('biometric_stored_token');
+    localStorage.removeItem('biometric_registered');
+    localStorage.removeItem('activeChatId');
+    localStorage.removeItem('current_view');
+    sessionStorage.clear();
     setAppStateWithTransition('login', -1);
   };
+
+  useEffect(() => {
+    handleLogoutRef.current = handleLogout;
+  });
 
   const getAnimationVariants = () => ({
     initial: (dir: number) => ({

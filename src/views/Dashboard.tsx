@@ -4,6 +4,7 @@ import { useLogs } from '../context/LogsContext';
 import { useData } from '../context/DataContext';
 import { motion } from 'motion/react';
 import { getImageUrl, activateDeactivateAction } from '../utils/api';
+import { formatRelativeTime } from '../utils/dateUtils';
 
 export default function Dashboard() {
   const { logs, fetchLogs } = useLogs();
@@ -258,7 +259,7 @@ export default function Dashboard() {
                   <p className="text-xs text-zinc-600 font-medium">{log.LogDetails || (log as any).logDetails}</p>
                   <div className="mt-2 flex justify-end">
                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest block text-right">
-                       {new Date(log.TimeOfAction || (log as any).timeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                       {formatRelativeTime(log.TimeOfAction || (log as any).timeOfAction)}
                      </span>
                   </div>
                 </div>

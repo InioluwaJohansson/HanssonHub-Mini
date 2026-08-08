@@ -4,6 +4,7 @@ import { GetLogDto } from '../utils/mockData';
 import { useLogs } from '../context/LogsContext';
 import { motion } from 'motion/react';
 import { getImageUrl } from '../utils/api';
+import { formatRelativeTime } from '../utils/dateUtils';
 
 export default function Logs() {
   const { logs, hasMore, loading, fetchLogs, fetchLogsByDate, clearLogs } = useLogs();
@@ -140,7 +141,7 @@ export default function Logs() {
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-start">
                   <p className="text-sm font-bold text-slate-900 truncate">{log.GetPersonDto?.GetPersonDetailsDto?.FirstName || (log as any).getPersonDto?.getPersonDetailsDto?.firstName} {log.GetPersonDto?.GetPersonDetailsDto?.LastName || (log as any).getPersonDto?.getPersonDetailsDto?.lastName}</p>
-                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest shrink-0 ml-2 bg-slate-100 px-2 py-0.5 rounded-md">{new Date(log.TimeOfAction || (log as any).timeOfAction).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest shrink-0 ml-2 bg-slate-100 px-2 py-0.5 rounded-md">{formatRelativeTime(log.TimeOfAction || (log as any).timeOfAction)}</span>
                 </div>
                 <p className="text-xs font-semibold text-blue-600 mt-1">{log.ActionType || (log as any).actionType}</p>
               </div>
@@ -214,7 +215,12 @@ export default function Logs() {
                   <div className="mt-0.5"><Clock size={16} className="text-sky-600" /></div>
                   <div>
                     <p className="text-[10px] font-black text-sky-500 uppercase tracking-widest mb-0.5">Timestamp</p>
-                    <p className="text-sm font-medium text-sky-950">{new Date(selectedLog.TimeOfAction || (selectedLog as any).timeOfAction).toLocaleString()}</p>
+                    <p className="text-sm font-medium text-sky-950">
+                      {formatRelativeTime(selectedLog.TimeOfAction || (selectedLog as any).timeOfAction)}
+                      <span className="text-xs text-sky-700 font-normal block mt-0.5">
+                        {new Date(selectedLog.TimeOfAction || (selectedLog as any).timeOfAction).toLocaleString()}
+                      </span>
+                    </p>
                   </div>
                 </div>
                 <div className="bg-amber-50/80 p-3 rounded-xl border border-amber-100 flex items-start gap-3">

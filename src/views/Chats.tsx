@@ -24,23 +24,7 @@ import {
   startRinging, stopRinging, playCallConnectSound, playCallDisconnectSound
 } from '../utils/audio';
 import Cropper from 'react-easy-crop';
-
-// Helper to trigger haptic feedback
-const triggerHaptic = (type: 'light' | 'medium' | 'heavy' | 'incoming' = 'light') => {
-  if (typeof navigator !== 'undefined' && navigator.vibrate) {
-    try {
-      if (type === 'incoming') {
-        navigator.vibrate([100, 50, 100]); // Two distinct pulses
-      } else if (type === 'heavy') {
-        navigator.vibrate([50, 30, 50]);
-      } else if (type === 'medium') {
-        navigator.vibrate(30);
-      } else {
-        navigator.vibrate(15);
-      }
-    } catch (e) {}
-  }
-};
+import { triggerHaptic } from '../utils/haptics';
 
 // Helper to convert cropped image
 const getCroppedImg = (imageSrc: string, pixelCrop: any): Promise<File> => {
@@ -854,6 +838,15 @@ export default function Chats({
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<{ [personId: number]: MediaStream }>({});
   const [callDuration, setCallDuration] = useState(0);
+  const [authVerified, setAuthVerified] = useState<boolean>(false);
+  useEffect(() => {
+    const isVerified = localStorage.getItem('auth_verified') === 'true';
+    setAuthVerified(isVerified);
+    if (!isVerified) {
+      setCallLogs([]);
+    }
+  }, [localStorage.getItem('auth_verified')]);
+
   const [activeSidebarTab, setActiveSidebarTab] = useState<'chats' | 'calls'>('chats');
   const [callLogs, setCallLogs] = useState<any[]>([]);
   const [isCallLogsLoading, setIsCallLogsLoading] = useState(false);
@@ -867,6 +860,10 @@ export default function Chats({
   const [pendingCallType, setPendingCallType] = useState<number | null>(null);
 
   const peerConnectionsRef = useRef<{ [personId: number]: RTCPeerConnection }>({});
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
+  const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
+  const iceCandidateQueueRef = useRef<{ [personId: number]: RTCIceCandidateInit[] }>({});
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRefs = useRef<{ [personId: number]: HTMLVideoElement | null }>({});
   const callTimerRef = useRef<any>(null);
@@ -959,8 +956,9 @@ export default function Chats({
     if (!callDto && !fallbackActiveCall) return null;
 
     const callId = callDto?.id || callDto?.Id || callDto?.callId || callDto?.CallId || fallbackActiveCall?.id || fallbackActiveCall?.Id || fallbackActiveCall?.callId || fallbackActiveCall?.CallId;
-    if (!callId) return null;
+    if (!callId || Number(callId) === 0) return null;
     const numericCallId = Number(callId);
+    if (isNaN(numericCallId)) return null;
 
     const activeObj = (activeCallRef.current && Number(activeCallRef.current.id || activeCallRef.current.Id || activeCallRef.current.callId || activeCallRef.current.CallId) === numericCallId)
       ? activeCallRef.current
@@ -970,16 +968,20 @@ export default function Chats({
     const chatId = callDto?.chatId || callDto?.ChatId || activeObj?.chatId || activeObj?.ChatId;
     const callerId = callDto?.callerPersonId || callDto?.CallerPersonId || activeObj?.callerPersonId || activeObj?.CallerPersonId;
 
-    let matchingChat = chatId ? localChatListRef.current.find(c => String(c.id) === String(chatId)) : null;
-    if (!matchingChat && callerId) {
-      matchingChat = localChatListRef.current.find(c => Number(c.personId || c.PartnerId || c.partnerId) === Number(callerId));
-    }
-
     const incomingParticipants = (callDto?.participants && callDto.participants.length > 0)
       ? callDto.participants
       : ((callDto?.Participants && callDto.Participants.length > 0)
         ? callDto.Participants
         : (activeObj?.participants || activeObj?.Participants || []));
+
+    if (!chatId && !callerId && (!incomingParticipants || incomingParticipants.length === 0)) {
+      return null;
+    }
+
+    let matchingChat = chatId ? localChatListRef.current.find(c => String(c.id) === String(chatId)) : null;
+    if (!matchingChat && callerId) {
+      matchingChat = localChatListRef.current.find(c => Number(c.personId || c.PartnerId || c.partnerId) === Number(callerId));
+    }
 
     let partnerId = (callerId && Number(callerId) !== currentUserId) ? Number(callerId) : null;
     if (!partnerId && incomingParticipants.length > 0) {
@@ -1004,7 +1006,7 @@ export default function Chats({
       } else if (matchingChat?.name || matchingChat?.Name) {
         chatName = matchingChat.name || matchingChat.Name;
       } else {
-        chatName = partnerId ? `User ${partnerId}` : 'Secure Call';
+        chatName = partnerId ? `User ${partnerId}` : (numericCallId ? `Call #${numericCallId}` : 'Unknown Call');
       }
     }
 
@@ -1100,8 +1102,15 @@ export default function Chats({
   };
 
   const updateCallInLogs = async (callDto: any, fallbackActiveCall?: any) => {
+    if (!callDto && !fallbackActiveCall) {
+      console.warn("updateCallInLogs called with no data");
+      return;
+    }
     const normCall = normalizeCallLogItem(callDto, fallbackActiveCall);
-    if (!normCall) return;
+    if (!normCall) {
+        console.warn("updateCallInLogs failed to normalize", callDto, fallbackActiveCall);
+        return;
+    }
 
     setCallLogs(prev => {
       const idx = prev.findIndex(item => Number(item.id || item.Id || item.callId || item.CallId) === Number(normCall.id));
@@ -1111,7 +1120,7 @@ export default function Chats({
         const merged = {
           ...existing,
           ...normCall,
-          chatName: (normCall.chatName && normCall.chatName !== 'Secure Call') ? normCall.chatName : (existing.chatName || 'Secure Call'),
+          chatName: (normCall.chatName && normCall.chatName !== 'Secure Call') ? normCall.chatName : (existing.chatName && existing.chatName !== 'Secure Call' ? existing.chatName : (normCall.chatName || 'Secure Call')),
           imageUrl: normCall.imageUrl || existing.imageUrl || '',
           participants: normCall.participants?.length ? normCall.participants : (existing.participants || [])
         };
@@ -1197,43 +1206,8 @@ export default function Chats({
   };
 
   const checkAndSetOngoingCall = (logsList: any[]) => {
-    if (!logsList || logsList.length === 0) return;
-    const currentUid = Number(currentUserIdRef.current);
-
-    const ongoingCall = logsList.find((log: any) => {
-      const rawStatus = log.status !== undefined ? log.status : log.Status;
-      const isEnded = rawStatus === 3 || rawStatus === 'Ended' || rawStatus === 5 || rawStatus === 'Rejected' || Boolean(log.endedAt || log.EndedAt);
-      const isMissed = log.isMissed || log.IsMissed || rawStatus === 4 || rawStatus === 'Missed';
-      if (isEnded || isMissed) return false;
-
-      const isStatusOngoing = rawStatus === 0 || rawStatus === 1 || rawStatus === 2 ||
-        rawStatus === 'Initiated' || rawStatus === 'Ringing' || rawStatus === 'Connected' ||
-        rawStatus === 'Active' || rawStatus === 'Ongoing';
-
-      return isStatusOngoing;
-    });
-
-    if (ongoingCall && (callStateRef.current === 'idle' || !activeCallRef.current)) {
-      const enriched = enrichCallDto(ongoingCall);
-      const callerId = enriched.callerPersonId || enriched.CallerPersonId;
-      const isCaller = Number(callerId) === currentUid;
-      const rawStatus = enriched.status !== undefined ? enriched.status : enriched.Status;
-
-      if (!isCaller) {
-        setIncomingCall(enriched);
-        setActiveCall(enriched);
-        setCallState('ringing_incoming');
-        startRinging();
-        triggerHaptic('incoming');
-      } else {
-        setActiveCall(enriched);
-        if (rawStatus === 2 || rawStatus === 'Connected' || rawStatus === 'Active') {
-          setCallState('connected');
-        } else {
-          setCallState('ringing_outgoing');
-        }
-      }
-    }
+    // Disable automatic ongoing call initialization from stale fetched logs/cache
+    return;
   };
 
   const fetchCallLogs = async (page = 1, append = false) => {
@@ -1315,6 +1289,16 @@ export default function Chats({
     stopRinging();
     playCallDisconnectSound();
     
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+    }
+    originalVideoTrackRef.current = null;
+
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => track.stop());
+      localStreamRef.current = null;
+    }
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
       setLocalStream(null);
@@ -1326,6 +1310,7 @@ export default function Chats({
       } catch (e) {}
     });
     peerConnectionsRef.current = {};
+    iceCandidateQueueRef.current = {};
     
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
@@ -1364,6 +1349,7 @@ export default function Chats({
         audio: true,
         video: video ? { width: 640, height: 480, facingMode: 'user' } : false
       });
+      localStreamRef.current = stream;
       setLocalStream(stream);
       if (isMuted) {
         stream.getAudioTracks().forEach(track => {
@@ -1404,198 +1390,388 @@ export default function Chats({
     }
   };
 
-  const initiateWebRTCOffer = async () => {
-    console.log("[WebRTC] Initiating WebRTC Offer...");
+  const processQueuedIceCandidates = async (partnerId: number, pc: RTCPeerConnection) => {
+    const queued = iceCandidateQueueRef.current[partnerId] || [];
+    if (queued.length > 0) {
+      console.log(`[WebRTC] Processing ${queued.length} queued ICE candidate(s) for partnerId=${partnerId}...`);
+      for (const candidateInit of queued) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+          console.log(`[WebRTC] Added queued ICE candidate successfully for partnerId=${partnerId}`);
+        } catch (e) {
+          console.warn(`[WebRTC] Error adding queued ICE candidate for partnerId=${partnerId}:`, e);
+        }
+      }
+      iceCandidateQueueRef.current[partnerId] = [];
+    }
+  };
+
+  const initiateWebRTCOffer = async (targetPartnerId?: number) => {
+    console.log("[WebRTC Caller] Initiating WebRTC Offer(s)... targetPartnerId =", targetPartnerId);
     try {
       const token = localStorage.getItem('auth_token') || '';
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-      
-      const partner = (activeCall?.participants || activeCall?.Participants || []).find((p: any) => Number(p.personId || p.PersonId) !== Number(currentUserId));
-      const partnerId = partner?.personId || partner?.PersonId || 0;
-      peerConnectionsRef.current[partnerId] = pc;
-      
-      if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-      }
-      
-      pc.onicecandidate = (event) => {
-        if (event.candidate && activeCall) {
-          const candidateDto = {
-            callId: Number(activeCall.id || activeCall.Id),
-            CallId: Number(activeCall.id || activeCall.Id),
-            chatId: parseInt(activeCall.chatId || activeCall.ChatId),
-            ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
-            personId: Number(currentUserIdRef.current),
-            PersonId: Number(currentUserIdRef.current),
-            candidate: JSON.stringify(event.candidate),
-            sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex
-          };
-          homeSecurityHubConnection.invoke("IceCandidate", candidateDto, token)
-            .catch(err => console.warn("Failed to send ICE Candidate", err));
+      const RTC_CONFIG = {
+        iceServers: [
+          {
+            urls: "stun:stun.l.google.com:19302"
+          }
+        ]
+      };
+
+      const call = activeCallRef.current;
+      const currentUid = Number(currentUserIdRef.current);
+
+      let partnerIds: number[] = [];
+      if (targetPartnerId && Number(targetPartnerId) !== currentUid) {
+        partnerIds = [Number(targetPartnerId)];
+      } else {
+        const participants = call?.participants || call?.Participants || [];
+        const connectedOrRinging = participants.filter((p: any) => {
+          const pId = Number(p.personId || p.PersonId || p.id || p.Id);
+          const pStatus = p.status !== undefined ? p.status : p.Status;
+          return pId !== currentUid && (pStatus === 1 || pStatus === "Connected" || pStatus === 0 || pStatus === "Ringing");
+        });
+
+        partnerIds = connectedOrRinging.map((p: any) => Number(p.personId || p.PersonId || p.id || p.Id));
+
+        if (partnerIds.length === 0) {
+          const fallbackPartnerId = Number(call?.callerPersonId || call?.CallerPersonId || 0);
+          if (fallbackPartnerId !== 0 && fallbackPartnerId !== currentUid) {
+            partnerIds = [fallbackPartnerId];
+          }
         }
-      };
-      
-      pc.ontrack = (event) => {
-        console.log("[WebRTC] Remote track received:", event.streams[0]);
-        setRemoteStreams(prev => ({
-          ...prev,
-          [partnerId]: event.streams[0]
-        }));
-      };
-      
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      
-      if (activeCall) {
-        const offerDto = {
-          callId: Number(activeCall.id || activeCall.Id),
-          CallId: Number(activeCall.id || activeCall.Id),
-          chatId: parseInt(activeCall.chatId || activeCall.ChatId),
-          ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
-          personId: Number(currentUserIdRef.current),
-          PersonId: Number(currentUserIdRef.current),
-          sdp: JSON.stringify(offer),
-          Sdp: JSON.stringify(offer)
+      }
+
+      if (partnerIds.length === 0) {
+        console.log("[WebRTC Caller] No remote partners found to offer.");
+        return;
+      }
+
+      const isVideoCall = call?.type === 2 || call?.Type === 2;
+      let stream = localStreamRef.current || localStream;
+      if (!stream) {
+        stream = await startLocalStream(isVideoCall);
+      }
+
+      for (const partnerId of partnerIds) {
+        let pc = peerConnectionsRef.current[partnerId];
+        if (!pc || pc.signalingState === 'closed') {
+          pc = new RTCPeerConnection(RTC_CONFIG);
+          peerConnectionsRef.current[partnerId] = pc;
+        }
+        console.log(`[WebRTC Caller] Configured RTCPeerConnection for partnerId=${partnerId}`);
+
+        pc.onsignalingstatechange = () => {
+          console.log(`[WebRTC Peer ${partnerId}] Signaling state changed: ${pc.signalingState}`);
         };
-        
-        await homeSecurityHubConnection.invoke("Offer", offerDto, token);
-        console.log("[WebRTC] Offer sent successfully!");
+        pc.oniceconnectionstatechange = () => {
+          console.log(`[WebRTC Peer ${partnerId}] ICE connection state changed: ${pc.iceConnectionState}`);
+        };
+        pc.onconnectionstatechange = () => {
+          console.log(`[WebRTC Peer ${partnerId}] Connection state changed: ${pc.connectionState}`);
+        };
+        pc.onicegatheringstatechange = () => {
+          console.log(`[WebRTC Peer ${partnerId}] ICE gathering state changed: ${pc.iceGatheringState}`);
+        };
+
+        if (stream) {
+          const senders = pc.getSenders();
+          stream.getTracks().forEach(track => {
+            if (!senders.some(s => s.track === track)) {
+              pc.addTrack(track, stream!);
+            }
+          });
+          console.log(`[WebRTC Caller] Added ${stream.getTracks().length} local track(s) for partnerId=${partnerId}.`);
+        }
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate && activeCallRef.current) {
+            console.log(`[WebRTC Caller] Generated ICE candidate for partnerId=${partnerId}:`, event.candidate.candidate);
+            const candidateDto = {
+              callId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+              CallId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+              chatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
+              ChatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
+              personId: currentUid,
+              PersonId: currentUid,
+              candidate: event.candidate.candidate,
+              Candidate: event.candidate.candidate,
+              sdpMid: event.candidate.sdpMid,
+              SdpMid: event.candidate.sdpMid,
+              sdpMLineIndex: event.candidate.sdpMLineIndex,
+              SdpMLineIndex: event.candidate.sdpMLineIndex
+            };
+            homeSecurityHubConnection.invoke("IceCandidate", candidateDto, token)
+              .catch(err => console.warn("[WebRTC Caller] Failed to send IceCandidate via SignalR:", err));
+          }
+        };
+
+        pc.ontrack = (event) => {
+          console.log(`[WebRTC Caller] Remote track received from partnerId=${partnerId}:`, event.track.kind, event.streams[0]);
+          if (event.streams && event.streams[0]) {
+            setRemoteStreams(prev => ({
+              ...prev,
+              [partnerId]: event.streams[0]
+            }));
+          }
+        };
+
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        console.log(`[WebRTC Caller] Local description set (Offer SDP, type=${offer.type}) for partnerId=${partnerId}.`);
+
+        if (activeCallRef.current) {
+          const offerDto = {
+            callId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+            CallId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+            chatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
+            ChatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
+            personId: currentUid,
+            PersonId: currentUid,
+            sdp: JSON.stringify(offer),
+            Sdp: JSON.stringify(offer)
+          };
+
+          await homeSecurityHubConnection.invoke("Offer", offerDto, token);
+          console.log(`[WebRTC Caller] Offer sent via SignalR to partnerId=${partnerId}, callId=${offerDto.callId}`);
+        }
       }
     } catch (err) {
-      console.warn("Failed to initiate WebRTC Offer", err);
+      console.warn("[WebRTC Caller] Failed to initiate WebRTC Offer:", err);
     }
   };
 
   const handleOffer = async (dto: any) => {
-    console.log("[WebRTC] SDP Offer received:", dto);
+    console.log("[WebRTC Receiver] Received SDP Offer DTO:", dto);
     if (!dto) return;
-    
-    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+
+    const dtoPersonId = Number(dto.personId !== undefined ? dto.personId : (dto.PersonId !== undefined ? dto.PersonId : 0));
     const currentUid = Number(currentUserIdRef.current);
     if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
-      console.log("[WebRTC] Ignored SDP Offer from self.");
+      console.log("[WebRTC Receiver] Ignored SDP Offer originating from self.");
       return;
     }
 
+    const partnerId = dtoPersonId || Number(dto.callerPersonId || dto.CallerPersonId || activeCallRef.current?.callerPersonId || activeCallRef.current?.CallerPersonId || 0);
+
     try {
       const token = localStorage.getItem('auth_token') || '';
-      const pc = new RTCPeerConnection({
-        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-      });
-      
-      const partnerId = dtoPersonId || dto.callerPersonId || dto.CallerPersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
-      peerConnectionsRef.current[partnerId] = pc;
-      
-      if (localStream) {
-        localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+      const RTC_CONFIG = {
+        iceServers: [
+          {
+            urls: "stun:stun.l.google.com:19302"
+          }
+        ]
+      };
+
+      let pc = peerConnectionsRef.current[partnerId];
+      if (!pc || pc.signalingState === 'closed') {
+        pc = new RTCPeerConnection(RTC_CONFIG);
+        peerConnectionsRef.current[partnerId] = pc;
       }
-      
+      console.log(`[WebRTC Receiver] Configured RTCPeerConnection for partnerId=${partnerId}`);
+
+      pc.onsignalingstatechange = () => {
+        console.log(`[WebRTC Peer ${partnerId}] Signaling state changed: ${pc.signalingState}`);
+      };
+      pc.oniceconnectionstatechange = () => {
+        console.log(`[WebRTC Peer ${partnerId}] ICE connection state changed: ${pc.iceConnectionState}`);
+      };
+      pc.onconnectionstatechange = () => {
+        console.log(`[WebRTC Peer ${partnerId}] Connection state changed: ${pc.connectionState}`);
+      };
+      pc.onicegatheringstatechange = () => {
+        console.log(`[WebRTC Peer ${partnerId}] ICE gathering state changed: ${pc.iceGatheringState}`);
+      };
+
+      // Get local media & Add local tracks
+      const isVideoCall = activeCallRef.current?.type === 2 || activeCallRef.current?.Type === 2 || dto.type === 2;
+      let stream = localStreamRef.current || localStream;
+      if (!stream) {
+        stream = await startLocalStream(isVideoCall);
+      }
+      if (stream) {
+        const senders = pc.getSenders();
+        stream.getTracks().forEach(track => {
+          if (!senders.some(s => s.track === track)) {
+            pc.addTrack(track, stream!);
+          }
+        });
+        console.log(`[WebRTC Receiver] Added local track(s) for partnerId=${partnerId}.`);
+      }
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log(`[WebRTC Receiver] Generated ICE candidate for partnerId=${partnerId}:`, event.candidate.candidate);
           const candidateDto = {
-            callId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
-            CallId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
-            chatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
-            ChatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
-            personId: Number(currentUserIdRef.current),
-            PersonId: Number(currentUserIdRef.current),
-            candidate: JSON.stringify(event.candidate),
+            callId: Number(dto.callId || dto.CallId || activeCallRef.current?.id || activeCallRef.current?.Id),
+            CallId: Number(dto.callId || dto.CallId || activeCallRef.current?.id || activeCallRef.current?.Id),
+            chatId: parseInt(dto.chatId || dto.ChatId || activeCallRef.current?.chatId || activeCallRef.current?.ChatId),
+            ChatId: parseInt(dto.chatId || dto.ChatId || activeCallRef.current?.chatId || activeCallRef.current?.ChatId),
+            personId: currentUid,
+            PersonId: currentUid,
+            candidate: event.candidate.candidate,
+            Candidate: event.candidate.candidate,
             sdpMid: event.candidate.sdpMid,
-            sdpMLineIndex: event.candidate.sdpMLineIndex
+            SdpMid: event.candidate.sdpMid,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            SdpMLineIndex: event.candidate.sdpMLineIndex
           };
           homeSecurityHubConnection.invoke("IceCandidate", candidateDto, token)
-            .catch(err => console.warn("Failed to send ICE Candidate", err));
+            .catch(err => console.warn("[WebRTC Receiver] Failed to send IceCandidate via SignalR:", err));
         }
       };
-      
+
       pc.ontrack = (event) => {
-        console.log("[WebRTC] Remote track received (callee):", event.streams[0]);
-        setRemoteStreams(prev => ({
-          ...prev,
-          [partnerId]: event.streams[0]
-        }));
+        console.log(`[WebRTC Receiver] Remote track received from partnerId=${partnerId}:`, event.track.kind, event.streams[0]);
+        if (event.streams && event.streams[0]) {
+          setRemoteStreams(prev => ({
+            ...prev,
+            [partnerId]: event.streams[0]
+          }));
+        }
       };
-      
-      const sdpVal = dto.sdp || dto.Sdp;
-      const offerSdp = typeof sdpVal === 'string' ? JSON.parse(sdpVal) : sdpVal;
-      await pc.setRemoteDescription(new RTCSessionDescription(offerSdp));
-      
+
+      // Set received SDP as remote description
+      const rawSdp = dto.sdp || dto.Sdp;
+      let offerDescription: RTCSessionDescriptionInit;
+      if (typeof rawSdp === 'string') {
+        try {
+          const parsed = JSON.parse(rawSdp);
+          offerDescription = typeof parsed === 'object' && parsed.type ? parsed : { type: 'offer', sdp: rawSdp };
+        } catch (e) {
+          offerDescription = { type: 'offer', sdp: rawSdp };
+        }
+      } else {
+        offerDescription = rawSdp;
+      }
+
+      await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+      console.log(`[WebRTC Receiver] Remote description set for offer from partnerId=${partnerId}.`);
+
+      // Flush queued ICE candidates
+      await processQueuedIceCandidates(partnerId, pc);
+
+      // Create an answer & set local description
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
-      
+      console.log(`[WebRTC Receiver] Local description set (Answer SDP).`);
+
       const answerDto = {
-        callId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
-        CallId: Number(dto.callId || dto.CallId || activeCall?.id || activeCall?.Id),
-        chatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
-        ChatId: parseInt(dto.chatId || dto.ChatId || activeCall?.chatId || activeCall?.ChatId),
-        personId: Number(currentUserIdRef.current),
-        PersonId: Number(currentUserIdRef.current),
+        callId: Number(dto.callId || dto.CallId || activeCallRef.current?.id || activeCallRef.current?.Id),
+        CallId: Number(dto.callId || dto.CallId || activeCallRef.current?.id || activeCallRef.current?.Id),
+        chatId: parseInt(dto.chatId || dto.ChatId || activeCallRef.current?.chatId || activeCallRef.current?.ChatId),
+        ChatId: parseInt(dto.chatId || dto.ChatId || activeCallRef.current?.chatId || activeCallRef.current?.ChatId),
+        personId: currentUid,
+        PersonId: currentUid,
         sdp: JSON.stringify(answer),
         Sdp: JSON.stringify(answer)
       };
-      
+
       await homeSecurityHubConnection.invoke("Answer", answerDto, token);
-      console.log("[WebRTC] Answer sent successfully!");
+      console.log(`[WebRTC Receiver] Answer sent successfully via SignalR to callId=${answerDto.callId}`);
     } catch (err) {
-      console.warn("Failed to handle offer", err);
+      console.warn("[WebRTC Receiver] Failed to handle offer:", err);
     }
   };
 
   const handleAnswer = async (dto: any) => {
-    console.log("[WebRTC] SDP Answer received:", dto);
+    console.log("[WebRTC Caller] Received SDP Answer DTO:", dto);
     if (!dto) return;
 
-    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+    const dtoPersonId = Number(dto.personId !== undefined ? dto.personId : (dto.PersonId !== undefined ? dto.PersonId : 0));
     const currentUid = Number(currentUserIdRef.current);
     if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
-      console.log("[WebRTC] Ignored SDP Answer from self.");
+      console.log("[WebRTC Caller] Ignored SDP Answer originating from self.");
       return;
     }
 
     try {
-      const partnerId = dtoPersonId || dto.personId || dto.PersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
-      const pc = peerConnectionsRef.current[partnerId];
+      const partnerId = dtoPersonId || Number(dto.callerPersonId || dto.CallerPersonId || activeCallRef.current?.callerPersonId || activeCallRef.current?.CallerPersonId || 0);
+      const pc = peerConnectionsRef.current[partnerId] || Object.values(peerConnectionsRef.current)[0];
       if (pc) {
-        const answerSdp = JSON.parse(dto.sdp);
-        await pc.setRemoteDescription(new RTCSessionDescription(answerSdp));
-        console.log("[WebRTC] Remote description set for answer successfully!");
+        const rawSdp = dto.sdp || dto.Sdp;
+        let answerDescription: RTCSessionDescriptionInit;
+        if (typeof rawSdp === 'string') {
+          try {
+            const parsed = JSON.parse(rawSdp);
+            answerDescription = typeof parsed === 'object' && parsed.type ? parsed : { type: 'answer', sdp: rawSdp };
+          } catch (e) {
+            answerDescription = { type: 'answer', sdp: rawSdp };
+          }
+        } else {
+          answerDescription = rawSdp;
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(answerDescription));
+        console.log(`[WebRTC Caller] Remote description set for Answer from partnerId=${partnerId}.`);
+
+        // Flush queued ICE candidates
+        await processQueuedIceCandidates(partnerId, pc);
+      } else {
+        console.warn(`[WebRTC Caller] No RTCPeerConnection found for partnerId=${partnerId} when receiving Answer.`);
       }
     } catch (err) {
-      console.warn("Failed to handle answer", err);
+      console.warn("[WebRTC Caller] Failed to handle Answer:", err);
     }
   };
 
   const handleIceCandidate = async (dto: any) => {
-    console.log("[WebRTC] ICE Candidate received:", dto);
+    console.log("[WebRTC] Received ICE Candidate DTO:", dto);
     if (!dto) return;
 
-    const dtoPersonId = Number(dto.PersonId !== undefined ? dto.PersonId : (dto.personId !== undefined ? dto.personId : 0));
+    const dtoPersonId = Number(dto.personId !== undefined ? dto.personId : (dto.PersonId !== undefined ? dto.PersonId : 0));
     const currentUid = Number(currentUserIdRef.current);
     if (dtoPersonId !== 0 && dtoPersonId === currentUid) {
-      console.log("[WebRTC] Ignored ICE Candidate from self.");
+      console.log("[WebRTC] Ignored ICE Candidate originating from self.");
       return;
     }
 
     try {
-      const partnerId = dtoPersonId || dto.personId || dto.PersonId || activeCall?.callerPersonId || activeCall?.CallerPersonId || 0;
-      const pc = peerConnectionsRef.current[partnerId];
-      if (pc && dto.candidate) {
-        const candObj = JSON.parse(dto.candidate);
-        await pc.addIceCandidate(new RTCIceCandidate(candObj));
-        console.log("[WebRTC] ICE Candidate added successfully!");
+      const partnerId = dtoPersonId || Number(dto.callerPersonId || dto.CallerPersonId || activeCallRef.current?.callerPersonId || activeCallRef.current?.CallerPersonId || 0);
+
+      let candStr = dto.candidate !== undefined ? dto.candidate : dto.Candidate;
+      let sdpMid = dto.sdpMid !== undefined ? dto.sdpMid : dto.SdpMid;
+      let sdpMLineIndex = dto.sdpMLineIndex !== undefined ? dto.sdpMLineIndex : dto.SdpMLineIndex;
+
+      if (typeof candStr === 'string' && candStr.trim().startsWith('{')) {
+        try {
+          const parsed = JSON.parse(candStr);
+          if (parsed.candidate) candStr = parsed.candidate;
+          if (parsed.sdpMid !== undefined) sdpMid = parsed.sdpMid;
+          if (parsed.sdpMLineIndex !== undefined) sdpMLineIndex = parsed.sdpMLineIndex;
+        } catch (e) {
+          // ignore parse error, use raw string
+        }
+      }
+
+      const candidateInit: RTCIceCandidateInit = {
+        candidate: candStr,
+        sdpMid: sdpMid,
+        sdpMLineIndex: sdpMLineIndex !== null && sdpMLineIndex !== undefined ? Number(sdpMLineIndex) : undefined
+      };
+
+      const pc = peerConnectionsRef.current[partnerId] || Object.values(peerConnectionsRef.current)[0];
+
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        await pc.addIceCandidate(new RTCIceCandidate(candidateInit));
+        console.log(`[WebRTC] ICE Candidate added successfully for partnerId=${partnerId}`);
+      } else {
+        console.log(`[WebRTC] Remote description not set yet for partnerId=${partnerId}. Queuing ICE candidate...`);
+        if (!iceCandidateQueueRef.current[partnerId]) {
+          iceCandidateQueueRef.current[partnerId] = [];
+        }
+        iceCandidateQueueRef.current[partnerId].push(candidateInit);
       }
     } catch (err) {
-      console.warn("Failed to handle ICE candidate", err);
+      console.warn("[WebRTC] Error processing ICE candidate:", err);
     }
   };
 
   const proceedWithStartCall = async (type: number) => {
     if (!activeChat) return;
     try {
-      triggerHaptic('light');
+      triggerHaptic('call');
       const response = await startCall(parseInt(activeChat.id), type);
       const callData = response?.data ?? response?.Data ?? response;
       if (callData) {
@@ -1746,8 +1922,9 @@ export default function Chats({
       const nextMuted = !isMuted;
       setIsMuted(nextMuted);
       
-      if (localStream) {
-        localStream.getAudioTracks().forEach(track => {
+      const stream = localStreamRef.current || localStream;
+      if (stream) {
+        stream.getAudioTracks().forEach(track => {
           track.enabled = !nextMuted;
         });
       }
@@ -1778,19 +1955,19 @@ export default function Chats({
       const nextCam = !isCameraEnabled;
       setIsCameraEnabled(nextCam);
       
-      let streamToUse = localStream;
-      if (nextCam && (!localStream || localStream.getVideoTracks().length === 0)) {
+      let streamToUse = localStreamRef.current || localStream;
+      if (nextCam && (!streamToUse || streamToUse.getVideoTracks().length === 0)) {
         const newStream = await startLocalStream(true);
         if (newStream) {
           streamToUse = newStream;
         }
-      } else if (localStream) {
-        localStream.getVideoTracks().forEach(track => {
+      } else if (streamToUse) {
+        streamToUse.getVideoTracks().forEach(track => {
           track.enabled = nextCam;
         });
       }
       
-      if (streamToUse) {
+      if (streamToUse && !isScreenSharing) {
         const videoTrack = streamToUse.getVideoTracks()[0];
         if (videoTrack) {
           Object.values(peerConnectionsRef.current).forEach((pc: RTCPeerConnection) => {
@@ -1829,29 +2006,123 @@ export default function Chats({
     }
   };
 
-  const handleToggleScreenShare = async () => {
-    if (!activeCall) return;
-    try {
-      const nextSharing = !isScreenSharing;
-      setIsScreenSharing(nextSharing);
-      
-      triggerToast(nextSharing ? "Screen Sharing Active" : "Screen Sharing Inactive");
-      
+  const stopScreenShareAndRestore = async () => {
+    if (screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+      screenStreamRef.current = null;
+    }
+
+    setIsScreenSharing(false);
+    triggerToast("Screen Sharing Stopped");
+
+    const currentLocalStream = localStreamRef.current || localStream;
+    let restoreTrack: MediaStreamTrack | null = originalVideoTrackRef.current;
+    if (!restoreTrack || restoreTrack.readyState === 'ended') {
+      if (currentLocalStream && currentLocalStream.getVideoTracks().length > 0) {
+        restoreTrack = currentLocalStream.getVideoTracks()[0];
+      }
+    }
+
+    if (restoreTrack && restoreTrack.readyState !== 'ended' && isCameraEnabled) {
+      Object.values(peerConnectionsRef.current).forEach((pc: RTCPeerConnection) => {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(restoreTrack).catch(err => console.warn("replaceTrack restore camera failed", err));
+        }
+      });
+    } else {
+      Object.values(peerConnectionsRef.current).forEach((pc: RTCPeerConnection) => {
+        const senders = pc.getSenders();
+        const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+        if (videoSender) {
+          videoSender.replaceTrack(null).catch(() => {});
+        }
+      });
+    }
+    originalVideoTrackRef.current = null;
+
+    if (activeCallRef.current) {
       const token = localStorage.getItem('auth_token') || '';
-      await homeSecurityHubConnection.invoke("ToggleCallItems", { 
-        callId: Number(activeCall.id || activeCall.Id), 
-        chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+      await homeSecurityHubConnection.invoke("ToggleCallItems", {
+        callId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+        chatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
         personId: Number(currentUserIdRef.current),
         isMuted: isMuted,
         isCameraEnabled: isCameraEnabled,
-        isSharing: nextSharing,
-        CallId: Number(activeCall.id || activeCall.Id), 
-        ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+        isSharing: false,
+        CallId: Number(activeCallRef.current.id || activeCallRef.current.Id),
+        ChatId: parseInt(activeCallRef.current.chatId || activeCallRef.current.ChatId),
         PersonId: Number(currentUserIdRef.current),
         IsMuted: isMuted,
         IsCameraEnabled: isCameraEnabled,
-        IsSharing: nextSharing
-      }, token).catch(() => console.warn("Failed to invoke ToggleCallItems"));
+        IsSharing: false
+      }, token).catch(() => console.warn("Failed to invoke ToggleCallItems on screen share stop"));
+    }
+  };
+
+  const handleToggleScreenShare = async () => {
+    if (!activeCall) return;
+    try {
+      if (isScreenSharing) {
+        await stopScreenShareAndRestore();
+        return;
+      }
+
+      let screenStream: MediaStream | null = null;
+      try {
+        screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        screenStreamRef.current = screenStream;
+      } catch (err) {
+        console.warn("Screen share permission denied or cancelled", err);
+        setIsScreenSharing(false);
+        return;
+      }
+
+      const screenTrack = screenStream.getVideoTracks()[0];
+      if (screenTrack) {
+        const currentLocalStream = localStreamRef.current || localStream;
+        if (currentLocalStream && currentLocalStream.getVideoTracks().length > 0) {
+          originalVideoTrackRef.current = currentLocalStream.getVideoTracks()[0];
+        }
+
+        Object.values(peerConnectionsRef.current).forEach((pc: RTCPeerConnection) => {
+          const senders = pc.getSenders();
+          const videoSender = senders.find(s => s.track && s.track.kind === 'video');
+          if (videoSender) {
+            videoSender.replaceTrack(screenTrack).catch(err => console.warn("replaceTrack screen failed", err));
+          } else {
+            try {
+              pc.addTrack(screenTrack, screenStream!);
+            } catch (e) {
+              console.warn("addTrack screen failed", e);
+            }
+          }
+        });
+
+        screenTrack.onended = async () => {
+          await stopScreenShareAndRestore();
+        };
+
+        setIsScreenSharing(true);
+        triggerToast("Screen Sharing Active");
+
+        const token = localStorage.getItem('auth_token') || '';
+        await homeSecurityHubConnection.invoke("ToggleCallItems", { 
+          callId: Number(activeCall.id || activeCall.Id), 
+          chatId: parseInt(activeCall.chatId || activeCall.ChatId),
+          personId: Number(currentUserIdRef.current),
+          isMuted: isMuted,
+          isCameraEnabled: isCameraEnabled,
+          isSharing: true,
+          CallId: Number(activeCall.id || activeCall.Id), 
+          ChatId: parseInt(activeCall.chatId || activeCall.ChatId),
+          PersonId: Number(currentUserIdRef.current),
+          IsMuted: isMuted,
+          IsCameraEnabled: isCameraEnabled,
+          IsSharing: true
+        }, token).catch(() => console.warn("Failed to invoke ToggleCallItems"));
+      }
     } catch (err) {
       console.warn("Failed to toggle screen sharing", err);
     }
@@ -3055,6 +3326,20 @@ export default function Chats({
       const currentStatus = callDto.status !== undefined ? callDto.status : callDto.Status;
       const savedCall = activeCallRef.current;
 
+      // Clean up individual peer connection and remote stream for the left participant
+      if (leftPersonId && peerConnectionsRef.current[Number(leftPersonId)]) {
+        try {
+          peerConnectionsRef.current[Number(leftPersonId)].close();
+        } catch (e) {}
+        delete peerConnectionsRef.current[Number(leftPersonId)];
+        delete iceCandidateQueueRef.current[Number(leftPersonId)];
+        setRemoteStreams(prev => {
+          const copy = { ...prev };
+          delete copy[Number(leftPersonId)];
+          return copy;
+        });
+      }
+
       // If current user is the one who left, or if call ended globally
       if ((leftPersonId && Number(leftPersonId) === currentUserId) || currentStatus === 3 || currentStatus === 'Ended') {
         cleanupActiveCall();
@@ -3266,6 +3551,7 @@ export default function Chats({
       homeSecurityHubConnection.off("ReceiveIceCandidate", handleIceCandidateWrapped);
       homeSecurityHubConnection.off("ToggleCallItems", handleToggleCallItemsWrapped);
       homeSecurityHubConnection.off("CallItemsToggled", handleToggleCallItemsWrapped);
+      cleanupActiveCall();
     };
   }, []);
 
@@ -3452,6 +3738,14 @@ export default function Chats({
     }
   };
 
+  // Expose fetchChats ref globally for post-login auto fetch
+  useEffect(() => {
+    (window as any).__fetchChatsRef = () => fetchChats(true);
+    return () => {
+      delete (window as any).__fetchChatsRef;
+    };
+  }, []);
+
   // Fetch All data from cache or network
   useEffect(() => {
     const loadInitial = async () => {
@@ -3467,23 +3761,19 @@ export default function Chats({
       // Fetch fresh call logs exactly once at startup/load
       fetchCallLogs();
 
-      if (Array.isArray((window as any).__cachedChats) && (window as any).__cachedChats.length > 0) {
-        setLocalChatList((window as any).__cachedChats);
-        setIsChatsLoading(false);
-        return;
-      }
       try {
         const cached = await getAllData(STORES.CHATS);
         if (Array.isArray(cached) && cached.length > 0) {
           setLocalChatList(cached as ChatRoom[]);
           (window as any).__cachedChats = cached;
           setIsChatsLoading(false);
-        } else {
-          fetchChats();
         }
       } catch (err) {
-        fetchChats();
+        console.warn("Failed to load cached chats:", err);
       }
+
+      // Automatically fetch fresh chats from server after load
+      fetchChats(true);
     };
     loadInitial();
 

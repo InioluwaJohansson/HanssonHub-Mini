@@ -3,6 +3,7 @@ import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle } from 'lucide
 import { motion } from 'motion/react';
 import { lockDoor, unlockDoor } from '../utils/api';
 import { useData } from '../context/DataContext';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function Doors() {
   const { doors, loading } = useData();
@@ -10,6 +11,7 @@ export default function Doors() {
 
   const toggleLock = async (id: string) => {
     try {
+      triggerHaptic('heavy');
       await lockDoor(id);
     } catch (err) {
       console.error("Failed to toggle lock for door", id, err);
@@ -18,6 +20,7 @@ export default function Doors() {
 
   const toggleOpen = async (id: string) => {
     try {
+      triggerHaptic('medium');
       await unlockDoor(id);
     } catch (err) {
       console.error("Failed to toggle open/close for door", id, err);

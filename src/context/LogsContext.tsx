@@ -24,8 +24,49 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [page, setPage] = useState(1);
   const isLoadingRef = useRef(false);
 
+  const clearLogs = useCallback(() => {
+    setLogs([]);
+    setPage(1);
+    setHasMore(true);
+  }, []);
+
+  const fetchLogs = useCallback(async (reset = false) => {
+    if (isLoadingRef.current || (!hasMore && !reset)) return;
+    
+    isLoadingRef.current = true;
+    setLoading(true);
+    
+    const currentPage = reset ? 1 : page;
+    
+    try {
+      const res = await getAllLogs(currentPage, 50);
+      if (res.status && res.data) {
+        setLogs(prev => {
+          const base = reset ? [] : prev;
+          const currentIds = new Set(base.map(l => l.Id ?? l.id));
+          const newBatch: GetLogDto[] = res.data;
+          const filteredNewBatch = newBatch.filter(l => !currentIds.has(l.Id ?? l.id));
+          const next = [...base, ...filteredNewBatch];
+          // Cache batch
+          Promise.all(filteredNewBatch.map(l => saveData(STORES.LOGS, l))).catch(e => console.warn('Logs batch cache failed:', e));
+          return next;
+        });
+        setPage(currentPage + 1);
+        if (res.data.length < 50) setHasMore(false);
+      } else {
+        setHasMore(false);
+      }
+    } catch (err) {
+      console.error('Failed to fetch logs', err);
+      setHasMore(false);
+    } finally {
+      setLoading(false);
+      isLoadingRef.current = false;
+    }
+  }, [page, hasMore]);
+
   useEffect(() => {
-    const loadCached = async () => {
+    const loadCachedAndFetch = async () => {
       try {
         const cached = await getAllData(STORES.LOGS);
         if (Array.isArray(cached) && cached.length > 0) {
@@ -40,15 +81,13 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         console.warn('Logs cache search failed:', err);
       }
-    };
-    loadCached();
-  }, []);
 
-  const clearLogs = useCallback(() => {
-    setLogs([]);
-    setPage(1);
-    setHasMore(true);
-  }, []);
+      if (localStorage.getItem('auth_token')) {
+        fetchLogs(true);
+      }
+    };
+    loadCachedAndFetch();
+  }, [fetchLogs]);
 
   const addLog = useCallback((logData: any) => {
      setLogs(prev => {
@@ -128,41 +167,6 @@ export const LogsProvider: React.FC<{ children: React.ReactNode }> = ({ children
         homeSecurityHubConnection.off("LogCreated", handleLogCreated);
      };
   }, [addLog]);
-
-  const fetchLogs = useCallback(async (reset = false) => {
-    if (isLoadingRef.current || (!hasMore && !reset)) return;
-    
-    isLoadingRef.current = true;
-    setLoading(true);
-    
-    const currentPage = reset ? 1 : page;
-    
-    try {
-      const res = await getAllLogs(currentPage, 50);
-      if (res.status && res.data) {
-        setLogs(prev => {
-          const base = reset ? [] : prev;
-          const currentIds = new Set(base.map(l => l.Id ?? l.id));
-          const newBatch: GetLogDto[] = res.data;
-          const filteredNewBatch = newBatch.filter(l => !currentIds.has(l.Id ?? l.id));
-          const next = [...base, ...filteredNewBatch];
-          // Cache batch
-          Promise.all(filteredNewBatch.map(l => saveData(STORES.LOGS, l))).catch(e => console.warn('Logs batch cache failed:', e));
-          return next;
-        });
-        setPage(currentPage + 1);
-        if (res.data.length < 50) setHasMore(false);
-      } else {
-        setHasMore(false);
-      }
-    } catch (err) {
-      console.error('Failed to fetch logs', err);
-      setHasMore(false);
-    } finally {
-      setLoading(false);
-      isLoadingRef.current = false;
-    }
-  }, [page, hasMore]);
 
   const fetchLogsByDate = useCallback(async (startDate: string, endDate: string, reset = true) => {
     if (isLoadingRef.current) return;

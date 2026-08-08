@@ -106,25 +106,25 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   };
 
   return (
-    <div className="flex h-full w-full flex-col bg-white justify-center px-6">
+    <div className="flex h-full w-full flex-col bg-zinc-50 dark:bg-zinc-950 justify-center px-6">
       <div className="flex flex-col gap-6 w-full max-w-sm mx-auto">
         
-        <div className="bg-white border border-zinc-200 p-8 shadow-2xl rounded-xl">
-          <h1 className="text-3xl tracking-tight text-zinc-800 text-center mb-8 select-none flex justify-center items-center gap-3">
-            <div className="p-2 border-2 border-black rounded-xl flex-shrink-0 bg-transparent flex items-center justify-center">
-               <Shield size={22} className="text-black" strokeWidth={2.5} fill="transparent" />
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-8 shadow-2xl rounded-xl">
+          <h1 className="text-3xl tracking-tight text-zinc-900 dark:text-zinc-100 text-center mb-8 select-none flex justify-center items-center gap-3">
+            <div className="p-2 border-2 border-zinc-900 dark:border-zinc-100 rounded-xl flex-shrink-0 bg-transparent flex items-center justify-center">
+               <Shield size={22} className="text-zinc-900 dark:text-zinc-100" strokeWidth={2.5} fill="transparent" />
             </div>
             <span>
-              <span className="font-black text-black">H</span><span className="font-medium tracking-tighter text-zinc-800">ansson</span><span className="font-black text-black">H</span><span className="font-medium tracking-tighter text-zinc-800">ub</span>
+              <span className="font-black text-zinc-900 dark:text-white">H</span><span className="font-medium tracking-tighter text-zinc-800 dark:text-zinc-300">ansson</span><span className="font-black text-zinc-900 dark:text-white">H</span><span className="font-medium tracking-tighter text-zinc-800 dark:text-zinc-300">ub</span>
             </span>
           </h1>
-          <h2 className="text-xl font-bold mb-6 text-zinc-800 flex items-center gap-2">
-            <LogIn size={24} className="text-zinc-600" /> Sign in
+          <h2 className="text-xl font-bold mb-6 text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+            <LogIn size={24} className="text-zinc-500 dark:text-zinc-400" /> Sign in
           </h2>
           <div className="space-y-7">
             {/* Username Input */}
             <div className="flex flex-col gap-1.5 w-full">
-              <label className="text-xs font-bold text-zinc-900 flex items-center gap-1.5 peer-focus:text-black">
+              <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 peer-focus:text-black dark:peer-focus:text-white">
                 <User size={14} className={`${error || (isSubmitted && !username) ? 'text-red-500' : username ? 'text-emerald-500' : 'text-zinc-400'}`} />
                 Username
               </label>
@@ -132,13 +132,13 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                className={`w-full py-2 bg-transparent border-b-2 focus:outline-none text-black rounded-none ${error || (isSubmitted && !username) ? 'border-red-500' : username ? 'border-emerald-500' : 'border-zinc-200'}`}
+                className={`w-full py-2 bg-transparent border-b-2 focus:outline-none text-zinc-900 dark:text-zinc-100 rounded-none ${error || (isSubmitted && !username) ? 'border-red-500' : username ? 'border-emerald-500' : 'border-zinc-300 dark:border-zinc-700'}`}
               />
             </div>
 
             {/* Password Input */}
             <div className="flex flex-col gap-1.5 w-full">
-              <label className="text-xs font-bold text-zinc-900 flex items-center gap-1.5 peer-focus:text-black">
+              <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 peer-focus:text-black dark:peer-focus:text-white">
                 <Lock size={14} className={`${error || (isSubmitted && !password) ? 'text-red-500' : password ? 'text-emerald-500' : 'text-zinc-400'}`} />
                 Password
               </label>
@@ -147,10 +147,10 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                   type={showPassword ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className={`w-full py-2 pr-8 bg-transparent border-b-2 focus:outline-none text-black rounded-none ${error || (isSubmitted && !password) ? 'border-red-500' : password ? 'border-emerald-500' : 'border-zinc-200'}`}
+                  className={`w-full py-2 pr-8 bg-transparent border-b-2 focus:outline-none text-zinc-900 dark:text-zinc-100 rounded-none ${error || (isSubmitted && !password) ? 'border-red-500' : password ? 'border-emerald-500' : 'border-zinc-300 dark:border-zinc-700'}`}
                 />
                 <div 
-                  className="absolute right-0 cursor-pointer text-zinc-400 hover:text-black z-10 transition-colors"
+                  className="absolute right-0 cursor-pointer text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 z-10 transition-colors"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -162,7 +162,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               <button
                 onClick={handleLogin}
                 disabled={isLoading}
-                className={`flex items-center justify-center gap-2 bg-transparent text-black py-3 font-bold text-sm tracking-widest border-2 border-black rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${hasStoredBiometric ? 'w-[80%]' : 'w-full'}`}
+                className={`flex items-center justify-center gap-2 bg-transparent text-zinc-900 dark:text-zinc-100 py-3 font-bold text-sm tracking-widest border-2 border-zinc-900 dark:border-zinc-100 rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${hasStoredBiometric ? 'w-[80%]' : 'w-full'}`}
               >
                 {isLoading ? <LoaderCircle size={18} className="animate-spin" /> : <LogIn size={18} strokeWidth={2.5} />}
                 {isLoading ? 'SIGNING IN...' : 'Sign in'}
@@ -173,7 +173,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
                   onClick={handleBiometricLogin}
                   disabled={isLoading}
                   title="Login with Fingerprint"
-                  className="w-[20%] flex items-center justify-center bg-black text-white py-3 border-2 border-black rounded-md hover:bg-zinc-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-[20%] flex items-center justify-center bg-zinc-900 dark:bg-zinc-100 text-zinc-100 dark:text-zinc-900 py-3 border-2 border-zinc-900 dark:border-zinc-100 rounded-md hover:bg-zinc-700 dark:hover:bg-zinc-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <Fingerprint size={24} />
                 </button>

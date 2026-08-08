@@ -5,6 +5,7 @@ import { isBiometricAvailable, authenticateBiometric, saveBiometricStoredToken, 
 import { getToken, changePassword, changeAuthCode, getUserDetails, getBaseUrl, saveBaseUrl, api } from '../utils/api';
 import { rebuildHubConnections } from '../utils/signalr';
 import ConfirmAuthModal from '../components/ConfirmAuthModal';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function Settings({ onBack }: { onBack?: () => void, key?: string | React.Key }) {
   const userDetails = getUserDetails();
@@ -201,11 +202,12 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
   const [successMsg, setSuccessMsg] = useState('');
 
   useEffect(() => {
-    isBiometricAvailable().then(avail => setBioAvailable(avail));
+    isBiometricAvailable().then(avail => setBioAvailable(true));
     setBioEnabled(!!getBiometricStoredToken());
   }, []);
 
   const handleToggleBio = async () => {
+    triggerHaptic('heavy');
     if (bioEnabled) {
       saveBiometricStoredToken('');
       setBioEnabled(false);
@@ -568,50 +570,50 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
       </div>
 
       <AnimatePresence>
-        {/* Pass Modal */}
+        {/* Password Modal */}
         {showPassModal && (
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
             <motion.div 
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
+              className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
             >
-              <button onClick={() => setShowPassModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600">
+              <button onClick={() => setShowPassModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
                 <X size={20} />
               </button>
               <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 rounded-full bg-rose-100"><Lock size={20} className="text-rose-600" /></div>
-                <h2 className="text-lg font-black text-slate-900">Change Password</h2>
+                <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60"><Lock size={20} className="text-rose-600 dark:text-rose-400" /></div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-zinc-100">Change Password</h2>
               </div>
 
               {successMsg ? (
                 <div className="flex flex-col items-center justify-center py-8">
                   <CheckCircle size={48} className="text-emerald-500 mb-4" />
-                  <p className="font-bold text-emerald-600 text-center">{successMsg}</p>
+                  <p className="font-bold text-emerald-600 dark:text-emerald-400 text-center">{successMsg}</p>
                 </div>
               ) : (
                 <form onSubmit={handlePasswordSubmit} noValidate className="flex flex-col gap-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Token</label>
-                    <input type="text" value={pToken} onChange={e => setPToken(e.target.value)} className={`w-full mt-1 bg-slate-50 border ${pAttempted && !pToken ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Token</label>
+                    <input type="text" value={pToken} onChange={e => setPToken(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pToken ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pAuthCode} onChange={e => setPAuthCode(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 border ${pAttempted && !pAuthCode ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current 6-digit Code" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Authorization Code</label>
+                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pAuthCode} onChange={e => setPAuthCode(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pAuthCode ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current 6-digit Code" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">New Password</label>
-                    <input type="password" value={pNewPass} onChange={e => setPNewPass(e.target.value)} className={`w-full mt-1 bg-slate-50 border ${pAttempted && !pNewPass ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new password" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">New Password</label>
+                    <input type="password" value={pNewPass} onChange={e => setPNewPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pNewPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new password" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Confirm Password</label>
-                    <input type="password" value={pConfPass} onChange={e => setPConfPass(e.target.value)} className={`w-full mt-1 bg-slate-50 border ${pAttempted && !pConfPass ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new password" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Confirm Password</label>
+                    <input type="password" value={pConfPass} onChange={e => setPConfPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pConfPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new password" />
                   </div>
                   
                   {errorMsg && <p className="text-xs font-bold text-red-500 text-center">{errorMsg}</p>}
                   
-                  <button type="submit" disabled={loading} className="w-full bg-slate-900 text-white font-bold text-sm rounded-xl py-3.5 mt-2 flex items-center justify-center gap-2 disabled:opacity-70">
+                  <button type="submit" disabled={loading} className="w-full bg-slate-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold text-sm rounded-xl py-3.5 mt-2 flex items-center justify-center gap-2 disabled:opacity-70">
                     {loading ? <LoaderCircle size={16} className="animate-spin" /> : 'Submit'}
                   </button>
                 </form>
@@ -627,43 +629,43 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
+              className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
             >
-              <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600">
+              <button onClick={() => setShowAuthModal(false)} className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300">
                 <X size={20} />
               </button>
               <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 rounded-full bg-indigo-100"><KeyRound size={20} className="text-indigo-600" /></div>
-                <h2 className="text-lg font-black text-slate-900">Change Authorization Code</h2>
+                <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-950/60"><KeyRound size={20} className="text-indigo-600 dark:text-indigo-400" /></div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-zinc-100">Change Authorization Code</h2>
               </div>
 
               {successMsg ? (
                 <div className="flex flex-col items-center justify-center py-8">
                   <CheckCircle size={48} className="text-emerald-500 mb-4" />
-                  <p className="font-bold text-emerald-600 text-center">{successMsg}</p>
+                  <p className="font-bold text-emerald-600 dark:text-emerald-400 text-center">{successMsg}</p>
                 </div>
               ) : (
                 <form onSubmit={handleAuthSubmit} noValidate className="flex flex-col gap-4">
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Token</label>
-                    <input type="text" value={aToken} onChange={e => setAToken(e.target.value)} className={`w-full mt-1 bg-slate-50 border ${aAttempted && !aToken ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Token</label>
+                    <input type="text" value={aToken} onChange={e => setAToken(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aToken ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Password</label>
-                    <input type="password" value={aPass} onChange={e => setAPass(e.target.value)} className={`w-full mt-1 bg-slate-50 border ${aAttempted && !aPass ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current Account Password" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Password</label>
+                    <input type="password" value={aPass} onChange={e => setAPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current Account Password" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">New Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aNewAuth} onChange={e => setANewAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 border ${aAttempted && !aNewAuth ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new 6-digit code" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">New Authorization Code</label>
+                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aNewAuth} onChange={e => setANewAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aNewAuth ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new 6-digit code" />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-slate-600 ml-1">Confirm Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aConfAuth} onChange={e => setAConfAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 border ${aAttempted && !aConfAuth ? 'border-red-500' : 'border-slate-200'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new 6-digit code" />
+                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Confirm Authorization Code</label>
+                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aConfAuth} onChange={e => setAConfAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aConfAuth ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new 6-digit code" />
                   </div>
                   
                   {errorMsg && <p className="text-xs font-bold text-red-500 text-center">{errorMsg}</p>}
                   
-                  <button type="submit" disabled={loading} className="w-full bg-slate-900 text-white font-bold text-sm rounded-xl py-3.5 mt-2 flex items-center justify-center gap-2 disabled:opacity-70">
+                  <button type="submit" disabled={loading} className="w-full bg-slate-900 dark:bg-zinc-100 text-white dark:text-zinc-900 font-bold text-sm rounded-xl py-3.5 mt-2 flex items-center justify-center gap-2 disabled:opacity-70">
                     {loading ? <LoaderCircle size={16} className="animate-spin" /> : 'Submit'}
                   </button>
                 </form>

@@ -14,6 +14,11 @@ export const pauseAllAudio = () => {
   }
 };
 
+export const stopAllSounds = () => {
+  stopRinging();
+  pauseAllAudio();
+};
+
 export const playNotificationSound = (type: 'messageReceived' | 'messageSent' | 'typingKeyStroke' | 'recording') => {
   if (localStorage.getItem('sounds_enabled') === 'false') return;
 

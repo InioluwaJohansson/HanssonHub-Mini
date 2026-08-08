@@ -1,54 +1,53 @@
+import { useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Shield } from 'lucide-react';
 
 export default function Splash({ onComplete }: { onComplete: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onComplete();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [onComplete]);
+
   return (
-    <div className="flex h-full w-full flex-col px-6 items-center justify-center bg-white relative">
-      <div className="relative p-8 flex flex-col items-center justify-center bg-white h-[200px] w-full max-w-sm overflow-hidden gap-4">
-        
-        <h1 className="text-3xl tracking-tight z-10 flex items-center text-zinc-800 gap-1">
-          <Shield size={28} className="text-black" strokeWidth={2.5} fill="transparent" />
-          <div className="relative p-3 inline-flex items-center justify-center w-64 h-16">
-            
-            <svg 
-              className="absolute inset-0 w-full h-full pointer-events-none" 
-              viewBox="0 0 200 40" 
-              style={{ overflow: 'visible' }}
-            >
-              <defs>
-                <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                  <feGaussianBlur stdDeviation="2" result="blur" />
-                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
-                </filter>
-              </defs>
-              <motion.text
-                x="50%"
-                y="55%"
-                textAnchor="middle"
-                dominantBaseline="middle"
-                className="text-[28px] fill-transparent stroke-black drop-shadow-md"
-                strokeWidth="1.2"
-                filter="url(#glow)"
-                initial={{ strokeDasharray: 300, strokeDashoffset: 300 }}
-                animate={{ strokeDasharray: 300, strokeDashoffset: 0 }}
-                transition={{ duration: 1.5, repeat: 4, ease: "linear" }}
-                onAnimationComplete={onComplete}
-              >
-                <tspan className="font-black">H</tspan>
-                <tspan className="font-medium tracking-tighter">ansson</tspan>
-                <tspan className="font-black">H</tspan>
-                <tspan className="font-medium tracking-tighter">ub</tspan>
-              </motion.text>
-            </svg>
-            
-            <span className="opacity-10 absolute inset-0 flex items-center justify-center">
-              <span>
-                <span className="font-black text-black">H</span><span className="font-medium tracking-tighter">ansson</span><span className="font-black text-black">H</span><span className="font-medium tracking-tighter">ub</span>
-              </span>
-            </span>
-          </div>
-        </h1>
+    <div className="flex h-full w-full flex-col items-center justify-center bg-white relative overflow-hidden select-none">
+      <div className="relative flex items-center justify-center">
+        {/* Soft radial glow behind the shield */}
+        <motion.div
+          className="absolute w-40 h-40 rounded-full bg-zinc-900/15 blur-2xl pointer-events-none"
+          animate={{
+            scale: [0.8, 1.4, 0.95, 1.3, 0.75],
+            opacity: [0.2, 0.95, 0.35, 0.85, 0.1]
+          }}
+          transition={{
+            duration: 3,
+            ease: "easeInOut"
+          }}
+        />
+
+        {/* Shield icon glowing from light to dark */}
+        <motion.div
+          animate={{
+            scale: [0.85, 1.15, 0.92, 1.08, 0.88],
+            opacity: [0.3, 1, 0.4, 0.9, 0.2],
+            filter: [
+              "drop-shadow(0 0 4px rgba(24, 24, 27, 0.2))",
+              "drop-shadow(0 0 28px rgba(24, 24, 27, 0.85))",
+              "drop-shadow(0 0 8px rgba(24, 24, 27, 0.3))",
+              "drop-shadow(0 0 32px rgba(24, 24, 27, 0.9))",
+              "drop-shadow(0 0 2px rgba(24, 24, 27, 0.1))"
+            ]
+          }}
+          transition={{
+            duration: 3,
+            ease: "easeInOut"
+          }}
+        >
+          <Shield size={84} className="text-zinc-900" strokeWidth={2.2} fill="currentColor" />
+        </motion.div>
       </div>
     </div>
   );
 }
+
