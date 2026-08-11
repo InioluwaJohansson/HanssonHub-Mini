@@ -14,7 +14,8 @@ import {
   getChatMessages, deleteMessage, getUnreadCount, getUserDetails,
   getStoredAppNamesList, updateGroupChat, deleteChat,
   sendTypingStatus, joinChatRoom, getBaseUrl, getImageUrl,
-  startCall, endCall, getCallLogs, acceptCall, rejectCall
+  startCall, endCall, getCallLogs, acceptCall, rejectCall,
+  getServerTime, parseServerDate, extractServerMessageData
 } from '../utils/api';
 import { MessageType } from '../types/chat';
 import { saveData, getData, getAllData, STORES, clearStore } from '../utils/db';
@@ -262,10 +263,10 @@ const getDescriptiveLastMessage = (msg: any): string => {
 
 const formatLastMessageTime = (dateInput?: string | Date | number, fallbackTime?: string): string => {
   if (!dateInput) return fallbackTime || "Just now";
-  const date = new Date(dateInput);
+  const date = parseServerDate(dateInput);
   if (isNaN(date.getTime())) return fallbackTime || "Just now";
 
-  const now = new Date();
+  const now = getServerTime();
   const diffMs = now.getTime() - date.getTime();
   const hours24 = 24 * 60 * 60 * 1000;
 
@@ -274,6 +275,24 @@ const formatLastMessageTime = (dateInput?: string | Date | number, fallbackTime?
   } else {
     return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   }
+};
+
+const getPartitionLabel = (dateInput?: string | Date | number): string => {
+  if (!dateInput) return "Today";
+  const date = parseServerDate(dateInput);
+  if (isNaN(date.getTime())) return "Today";
+
+  const now = getServerTime();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today.getTime() - target.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  if (diffDays < 7 && diffDays > 0) {
+    return date.toLocaleDateString([], { weekday: 'long' });
+  }
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
 };
 
 function AudioAttachmentPlayer({ mediaUrl, fileName, fileSize, isMe = false }: { mediaUrl?: string; fileName?: string; fileSize?: number; isMe?: boolean }) {
@@ -2734,11 +2753,12 @@ export default function Chats({
           const msgId = (msg.id || msg.Id || '').toString();
           if (!msgId || prev.some(m => m.id === msgId)) return prev;
           
+          const serverDate = parseServerDate(msg.sentAt || msg.SentAt || msg.createdAt || msg.CreatedAt);
           const mapped = {
             id: msgId,
             text: msg.content || msg.Content || '',
-            time: new Date(msg.sentAt || msg.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: msg.sentAt || msg.SentAt || new Date().toISOString(),
+            time: serverDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            sentAt: serverDate.toISOString(),
             isMe: isMe,
             senderName: msg.senderName || msg.SenderName || 'Anonymous',
             type: msg.type === MessageType.Image ? 'image' : msg.type === MessageType.Audio ? 'audio' : 'text',
@@ -3887,19 +3907,22 @@ export default function Chats({
       if (!isNaN(parsedId)) {
         const r = await getChatMessages(parsedId, 1, 100);
         if (Array.isArray(r)) {
-          const mappedMessages = r.map((msg: any) => ({
-            id: msg.id.toString(),
-            text: msg.content || '',
-            time: new Date(msg.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: msg.sentAt,
-            isMe: msg.senderPersonId === currentUserId,
-            senderName: msg.senderName || 'Anonymous',
-            type: msg.type === MessageType.Image ? 'image' : msg.type === MessageType.Audio ? 'audio' : 'text',
-            mediaUrl: msg.attachments && msg.attachments.length > 0 ? (msg.attachments[0].fileUrl || msg.attachments[0].filePath) : undefined,
-            attachments: msg.attachments || [],
-            replyToMessageId: msg.replyToMessageId || msg.ReplyToMessageId || msg.replyTo?.id || msg.ReplyTo?.Id,
-            replyTo: msg.replyTo || msg.ReplyTo
-          }));
+          const mappedMessages = r.map((msg: any) => {
+            const parsedDate = parseServerDate(msg.sentAt || msg.SentAt || msg.createdAt || msg.CreatedAt);
+            return {
+              id: msg.id.toString(),
+              text: msg.content || '',
+              time: parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              sentAt: parsedDate.toISOString(),
+              isMe: msg.senderPersonId === currentUserId,
+              senderName: msg.senderName || 'Anonymous',
+              type: msg.type === MessageType.Image ? 'image' : msg.type === MessageType.Audio ? 'audio' : 'text',
+              mediaUrl: msg.attachments && msg.attachments.length > 0 ? (msg.attachments[0].fileUrl || msg.attachments[0].filePath) : undefined,
+              attachments: msg.attachments || [],
+              replyToMessageId: msg.replyToMessageId || msg.ReplyToMessageId || msg.replyTo?.id || msg.ReplyTo?.Id,
+              replyTo: msg.replyTo || msg.ReplyTo
+            };
+          });
           setMessages(mappedMessages);
           
           // Save to IndexedDB cache
@@ -3950,11 +3973,12 @@ export default function Chats({
     
     // Optimistic update
     const tempId = Date.now().toString();
+    const serverNow = getServerTime();
     const localMessage = {
       id: tempId,
       text: txt,
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sentAt: new Date().toISOString(),
+      time: serverNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: serverNow.toISOString(),
       isMe: true,
       senderName: 'You',
       type: 'text',
@@ -3978,41 +4002,38 @@ export default function Chats({
       };
       
       const res = await sendMessage(payload);
+      const extracted = extractServerMessageData(res);
       
-      if (res) {
+      if (extracted) {
         playNotificationSound('messageSent');
-        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-        const serverTime = serverSentAt 
-          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         
         // Replace localMessage with server response
         setMessages(prev => {
           const next = prev.map(m => m.id === tempId ? {
             ...m,
-            id: (res.id || res.Id)?.toString(),
-            text: res.content || res.Content || txt,
-            time: serverTime,
-            sentAt: serverSentAt || m.sentAt,
-            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
-            replyTo: res.replyTo || res.ReplyTo || currentReplyTo,
+            id: extracted.id || tempId,
+            text: extracted.content || txt,
+            time: extracted.time,
+            sentAt: extracted.sentAt,
+            replyToMessageId: extracted.replyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            replyTo: extracted.replyTo || currentReplyTo,
             pending: false
           } : m);
           saveData(STORES.MESSAGES, { chatId: activeChat.id, list: next }).catch(() => {});
           return next;
         });
 
-        if (serverSentAt && activeChat) {
+        if (activeChat) {
           setLocalChatList(prevList => {
             let updatedItem: any = null;
             const nextList = prevList.map(c => {
               if (c.id === activeChat.id) {
                 updatedItem = {
                   ...c,
-                  lastMessage: getDescriptiveLastMessage(res) || txt,
-                  time: formatLastMessageTime(serverSentAt),
+                  lastMessage: getDescriptiveLastMessage(extracted.raw) || txt,
+                  time: formatLastMessageTime(extracted.sentAt),
                   lastMessageSenderId: currentUserId || 0,
-                  lastMessageSentAt: serverSentAt
+                  lastMessageSentAt: extracted.sentAt
                 };
                 saveData(STORES.CHATS, updatedItem).catch(() => {});
                 return updatedItem;
@@ -4138,42 +4159,38 @@ export default function Chats({
 
               try {
                 const res = await sendMessage(body);
-                if (res) {
-                  const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-                  const serverTime = serverSentAt
-                    ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+                const extracted = extractServerMessageData(res);
+                if (extracted) {
                   setMessages(prev => {
-                    const msgId = (res.id || res.Id)?.toString();
+                    const msgId = extracted.id;
                     if (!msgId || prev.some(m => m.id === msgId)) return prev;
                     const mapped = {
                       id: msgId,
-                      text: res.content || res.Content || file.name,
-                      time: serverTime,
-                      sentAt: serverSentAt || new Date().toISOString(),
+                      text: extracted.content || file.name,
+                      time: extracted.time,
+                      sentAt: extracted.sentAt,
                       isMe: true,
-                      senderName: res.senderName || res.SenderName || 'You',
-                      type: res.type === MessageType.Image ? 'image' : res.type === MessageType.Audio ? 'audio' : 'text',
-                      mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
-                      attachments: res.attachments || []
+                      senderName: extracted.senderName || 'You',
+                      type: extracted.type === MessageType.Image ? 'image' : extracted.type === MessageType.Audio ? 'audio' : 'text',
+                      mediaUrl: extracted.attachments && extracted.attachments.length > 0 ? (extracted.attachments[0].fileUrl || extracted.attachments[0].filePath || extracted.attachments[0].FilePath) : undefined,
+                      attachments: extracted.attachments || []
                     };
                     const next = [...prev, mapped];
                     saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
                     return next;
                   });
 
-                  if (serverSentAt && activeChat) {
+                  if (activeChat) {
                     setLocalChatList(prevList => {
                       let updatedItem: any = null;
                       const nextList = prevList.map(c => {
                         if (c.id === activeChat.id) {
                           updatedItem = {
                             ...c,
-                            lastMessage: getDescriptiveLastMessage(res) || file.name,
-                            time: formatLastMessageTime(serverSentAt),
+                            lastMessage: getDescriptiveLastMessage(extracted.raw) || file.name,
+                            time: formatLastMessageTime(extracted.sentAt),
                             lastMessageSenderId: currentUserId || 0,
-                            lastMessageSentAt: serverSentAt
+                            lastMessageSentAt: extracted.sentAt
                           };
                           saveData(STORES.CHATS, updatedItem).catch(() => {});
                           return updatedItem;
@@ -4287,12 +4304,13 @@ export default function Chats({
 
     const tempId = "attach-temp-" + Date.now().toString();
 
+    const serverNow = getServerTime();
     // Create a local optimistic message displaying base64 previews
     const optimisticMessage = {
       id: tempId,
       text: attachmentCaption || "",
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sentAt: new Date().toISOString(),
+      time: serverNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: serverNow.toISOString(),
       isMe: true,
       senderName: 'You',
       type: body.type === MessageType.Image ? 'image' : body.type === MessageType.Audio ? 'audio' : body.type === MessageType.Video ? 'video' : 'text',
@@ -4329,40 +4347,36 @@ export default function Chats({
     try {
       const res = await sendMessage(body);
       console.log('SendAttachment Dto Success:', res);
-      if (res) {
-        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-        const serverTime = serverSentAt
-          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+      const extracted = extractServerMessageData(res);
+      if (extracted) {
         setMessages(prev => {
           // Replace tempId with server response
           const next = prev.map(m => m.id === tempId ? {
             ...m,
-            id: (res.id || res.Id)?.toString(),
-            text: res.content || res.Content || m.text,
-            time: serverTime,
-            sentAt: serverSentAt || m.sentAt,
-            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            id: extracted.id || tempId,
+            text: extracted.content || m.text,
+            time: extracted.time,
+            sentAt: extracted.sentAt,
+            replyToMessageId: extracted.replyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
             pending: false,
-            mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
-            attachments: res.attachments || []
+            mediaUrl: extracted.attachments && extracted.attachments.length > 0 ? (extracted.attachments[0].fileUrl || extracted.attachments[0].filePath || extracted.attachments[0].FilePath) : undefined,
+            attachments: extracted.attachments || []
           } : m);
           saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
 
-        if (serverSentAt && activeChat) {
+        if (activeChat) {
           setLocalChatList(prevList => {
             let updatedItem: any = null;
             const nextList = prevList.map(c => {
               if (c.id === activeChat.id) {
                 updatedItem = {
                   ...c,
-                  lastMessage: getDescriptiveLastMessage(res) || attachmentCaption,
-                  time: formatLastMessageTime(serverSentAt),
+                  lastMessage: getDescriptiveLastMessage(extracted.raw) || attachmentCaption,
+                  time: formatLastMessageTime(extracted.sentAt),
                   lastMessageSenderId: currentUserId || 0,
-                  lastMessageSentAt: serverSentAt
+                  lastMessageSentAt: extracted.sentAt
                 };
                 saveData(STORES.CHATS, updatedItem).catch(() => {});
                 return updatedItem;
@@ -4397,12 +4411,13 @@ export default function Chats({
     const tempId = "voice-temp-" + Date.now().toString();
     const currentReplyTo = replyTo;
 
+    const voiceNow = getServerTime();
     // Create a local optimistic voice message
     const optimisticMessage = {
       id: tempId,
       text: '',
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sentAt: new Date().toISOString(),
+      time: voiceNow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      sentAt: voiceNow.toISOString(),
       isMe: true,
       senderName: 'You',
       type: 'audio',
@@ -4446,38 +4461,34 @@ export default function Chats({
       
       const res = await sendMessage(body);
       console.log('Send Voice Message Success', res);
-      if (res) {
-        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-        const serverTime = serverSentAt
-          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+      const extracted = extractServerMessageData(res);
+      if (extracted) {
         setMessages(prev => {
           const next = prev.map(m => m.id === tempId ? {
             ...m,
-            id: (res.id || res.Id)?.toString(),
-            time: serverTime,
-            sentAt: serverSentAt || m.sentAt,
-            replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
+            id: extracted.id || tempId,
+            time: extracted.time,
+            sentAt: extracted.sentAt,
+            replyToMessageId: extracted.replyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
             pending: false,
-            mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : m.mediaUrl,
-            attachments: res.attachments || []
+            mediaUrl: extracted.attachments && extracted.attachments.length > 0 ? (extracted.attachments[0].fileUrl || extracted.attachments[0].filePath || extracted.attachments[0].FilePath) : m.mediaUrl,
+            attachments: extracted.attachments || []
           } : m);
           saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
 
-        if (serverSentAt && activeChat) {
+        if (activeChat) {
           setLocalChatList(prevList => {
             let updatedItem: any = null;
             const nextList = prevList.map(c => {
               if (c.id === activeChat.id) {
                 updatedItem = {
                   ...c,
-                  lastMessage: getDescriptiveLastMessage(res) || '🎙️ Voice note',
-                  time: formatLastMessageTime(serverSentAt),
+                  lastMessage: getDescriptiveLastMessage(extracted.raw) || '🎙️ Voice note',
+                  time: formatLastMessageTime(extracted.sentAt),
                   lastMessageSenderId: currentUserId || 0,
-                  lastMessageSentAt: serverSentAt
+                  lastMessageSentAt: extracted.sentAt
                 };
                 saveData(STORES.CHATS, updatedItem).catch(() => {});
                 return updatedItem;
@@ -4950,32 +4961,28 @@ export default function Chats({
           type: msg.type === 'image' ? MessageType.Image : (msg.type === 'audio' ? MessageType.Audio : MessageType.Text),
           attachments: msg.attachments || []
       });
-      if (res) {
-        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-        const serverTime = serverSentAt
-          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-
+      const extracted = extractServerMessageData(res);
+      if (extracted) {
         setMessages(prev => prev.map(m => m.id === msg.id ? {
           ...m,
-          id: (res.id || res.Id)?.toString() || m.id,
-          time: serverTime,
-          sentAt: serverSentAt || m.sentAt,
+          id: extracted.id || m.id,
+          time: extracted.time,
+          sentAt: extracted.sentAt,
           status: 'sent',
           pending: false
         } : m));
 
-        if (serverSentAt && activeChat) {
+        if (activeChat) {
           setLocalChatList(prevList => {
             let updatedItem: any = null;
             const nextList = prevList.map(c => {
               if (c.id === activeChat.id) {
                 updatedItem = {
                   ...c,
-                  lastMessage: getDescriptiveLastMessage(res) || msg.text,
-                  time: formatLastMessageTime(serverSentAt),
+                  lastMessage: getDescriptiveLastMessage(extracted.raw) || msg.text,
+                  time: formatLastMessageTime(extracted.sentAt),
                   lastMessageSenderId: currentUserId || 0,
-                  lastMessageSentAt: serverSentAt
+                  lastMessageSentAt: extracted.sentAt
                 };
                 saveData(STORES.CHATS, updatedItem).catch(() => {});
                 return updatedItem;
@@ -5026,31 +5033,29 @@ export default function Chats({
         attachments: apiAttachments
       });
 
-      if (res) {
-        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
-        if (serverSentAt) {
-          setLocalChatList(prevList => {
-            let updatedItem: any = null;
-            const nextList = prevList.map(c => {
-              if (c.id === targetChatId) {
-                updatedItem = {
-                  ...c,
-                  lastMessage: getDescriptiveLastMessage(res) || messageToForward.text,
-                  time: formatLastMessageTime(serverSentAt),
-                  lastMessageSenderId: currentUserId || 0,
-                  lastMessageSentAt: serverSentAt
-                };
-                saveData(STORES.CHATS, updatedItem).catch(() => {});
-                return updatedItem;
-              }
-              return c;
-            });
-            if (updatedItem) {
-              return [updatedItem, ...nextList.filter(c => c.id !== targetChatId)];
+      const extracted = extractServerMessageData(res);
+      if (extracted) {
+        setLocalChatList(prevList => {
+          let updatedItem: any = null;
+          const nextList = prevList.map(c => {
+            if (c.id === targetChatId) {
+              updatedItem = {
+                ...c,
+                lastMessage: getDescriptiveLastMessage(extracted.raw) || messageToForward.text,
+                time: formatLastMessageTime(extracted.sentAt),
+                lastMessageSenderId: currentUserId || 0,
+                lastMessageSentAt: extracted.sentAt
+              };
+              saveData(STORES.CHATS, updatedItem).catch(() => {});
+              return updatedItem;
             }
-            return nextList;
+            return c;
           });
-        }
+          if (updatedItem) {
+            return [updatedItem, ...nextList.filter(c => c.id !== targetChatId)];
+          }
+          return nextList;
+        });
       }
 
       triggerToast(`Forwarded to ${targetChatName}!`);
@@ -5958,8 +5963,8 @@ export default function Chats({
                   });
 
                   const sorted = [...resolved].sort((a, b) => {
-                    const dateA = new Date(a.sentAt || a.SentAt || 0).getTime();
-                    const dateB = new Date(b.sentAt || b.SentAt || 0).getTime();
+                    const dateA = parseServerDate(a.sentAt || a.SentAt || 0).getTime();
+                    const dateB = parseServerDate(b.sentAt || b.SentAt || 0).getTime();
                     if (dateA !== dateB) return dateA - dateB;
                     const senderIdA = Number(a.senderPersonId || a.SenderPersonId || (a.isMe ? currentUserId : 0));
                     const senderIdB = Number(b.senderPersonId || b.SenderPersonId || (b.isMe ? currentUserId : 0));
@@ -5999,7 +6004,7 @@ export default function Chats({
 
                   let lastDateStr = '';
                   return filtered.map((msg, msgIdx) => {
-                    const msgDate = msg.sentAt ? new Date(msg.sentAt) : new Date();
+                    const msgDate = parseServerDate(msg.sentAt);
                     const msgDateStr = msgDate.toDateString();
                     const showDivider = msgDateStr !== lastDateStr;
                     lastDateStr = msgDateStr;
@@ -7281,7 +7286,7 @@ export default function Chats({
               </button>
 
               {/* Edit */}
-              {overlayMsg.isMe && (new Date().getTime() - new Date(overlayMsg.sentAt).getTime() <= 20 * 60 * 1000) && (
+              {overlayMsg.isMe && (getServerTime().getTime() - parseServerDate(overlayMsg.sentAt).getTime() <= 20 * 60 * 1000) && (
                 <button 
                   onClick={() => {
                     handleTriggerEdit(overlayMsg);

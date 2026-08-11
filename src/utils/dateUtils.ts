@@ -1,3 +1,5 @@
+import { getServerTime, parseServerDate } from './api';
+
 /**
  * Utility functions for date and time formatting.
  */
@@ -9,10 +11,10 @@
  */
 export const formatRelativeTime = (dateInput?: string | Date | number): string => {
   if (!dateInput) return '';
-  const date = new Date(dateInput);
+  const date = parseServerDate(dateInput);
   if (isNaN(date.getTime())) return String(dateInput);
 
-  const now = new Date();
+  const now = getServerTime();
   const diffMs = now.getTime() - date.getTime();
 
   // Handle future dates or clock skew

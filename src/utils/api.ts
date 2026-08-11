@@ -84,6 +84,70 @@ export const getStoredAppNamesList = () => {
   }
 };
 
+let serverTimeOffsetMs = 0;
+
+export const updateServerTimeFromHeader = (headerDateStr?: string) => {
+  if (!headerDateStr) return;
+  const serverTime = new Date(headerDateStr).getTime();
+  if (!isNaN(serverTime)) {
+    serverTimeOffsetMs = serverTime - Date.now();
+  }
+};
+
+export const getServerTime = (): Date => {
+  return new Date(Date.now() + serverTimeOffsetMs);
+};
+
+export const parseServerDate = (dateInput?: string | Date | number): Date => {
+  if (!dateInput) return getServerTime();
+  if (dateInput instanceof Date) return dateInput;
+  if (typeof dateInput === 'number') return new Date(dateInput);
+  
+  let str = String(dateInput).trim();
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(str)) {
+    str = str.replace(' ', 'T') + 'Z';
+  }
+  const d = new Date(str);
+  return isNaN(d.getTime()) ? getServerTime() : d;
+};
+
+export const extractServerMessageData = (res: any) => {
+  if (!res) return null;
+  const target = res.data || res.result || res.message || res.Data || res.Result || res.Message || res;
+  const id = (target.id || target.Id || res.id || res.Id)?.toString();
+  const content = target.content ?? target.Content ?? res.content ?? res.Content;
+  
+  const rawSentAt = target.sentAt || target.SentAt || target.createdAt || target.CreatedAt || 
+                    target.sentDate || target.SentDate || target.date || target.Date || 
+                    res.sentAt || res.SentAt || res.createdAt || res.CreatedAt || 
+                    res._serverHeaderDate || target._serverHeaderDate;
+  
+  const parsedDate = parseServerDate(rawSentAt);
+  const sentAt = parsedDate.toISOString();
+  const formattedTime = parsedDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  const replyToMessageId = target.replyToMessageId || target.ReplyToMessageId || res.replyToMessageId || res.ReplyToMessageId;
+  const replyTo = target.replyTo || target.ReplyTo || res.replyTo || res.ReplyTo;
+  const attachments = target.attachments || target.Attachments || res.attachments || res.Attachments;
+  const type = target.type ?? target.Type ?? res.type ?? res.Type;
+  const senderPersonId = target.senderPersonId || target.SenderPersonId || res.senderPersonId || res.SenderPersonId;
+  const senderName = target.senderName || target.SenderName || res.senderName || res.SenderName;
+
+  return {
+    id,
+    content,
+    sentAt,
+    time: formattedTime,
+    replyToMessageId,
+    replyTo,
+    attachments,
+    type,
+    senderPersonId,
+    senderName,
+    raw: target
+  };
+};
+
 export const api = axios.create({
   get baseURL() {
     return getBaseUrl() + '/Home_Security';
@@ -101,6 +165,28 @@ api.interceptors.request.use((config) => {
 }, (error) => {
   return Promise.reject(error);
 });
+
+api.interceptors.response.use(
+  (response) => {
+    const dateHeader = response.headers?.['date'] || response.headers?.get?.('date');
+    if (dateHeader) {
+      updateServerTimeFromHeader(dateHeader);
+    }
+    if (response.data && typeof response.data === 'object' && dateHeader) {
+      if (!response.data._serverHeaderDate) {
+        response.data._serverHeaderDate = dateHeader;
+      }
+    }
+    return response;
+  },
+  (error) => {
+    const dateHeader = error.response?.headers?.['date'] || error.response?.headers?.get?.('date');
+    if (dateHeader) {
+      updateServerTimeFromHeader(dateHeader);
+    }
+    return Promise.reject(error);
+  }
+);
 
 export const loginUser = async (userName: string, password: string) => {
   const response = await api.get('/User/Login', {
