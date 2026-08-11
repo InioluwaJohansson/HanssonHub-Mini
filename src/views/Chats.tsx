@@ -3669,11 +3669,15 @@ export default function Chats({
 
   // Fetch all chats on component mount / navigation
   const fetchChats = async (silent = false) => {
+    if (!localStorage.getItem('auth_token')) {
+      setIsChatsLoading(false);
+      return [];
+    }
     if (!silent && localChatList.length === 0) {
       setIsChatsLoading(true);
     }
     const timeoutPromise = new Promise<never>((_, reject) => 
-      setTimeout(() => reject(new Error("Timeout")), 8000)
+      setTimeout(() => reject(new Error("Timeout")), 15000)
     );
     try {
       const data = await Promise.race([getMyChats(), timeoutPromise]);
@@ -3727,12 +3731,13 @@ export default function Chats({
         
         return mapped;
       }
-    } catch (err) {
-      console.error("Failed to load real chats", err);
-      if (!silent) {
-        setLocalChatList([]);
+    } catch (err: any) {
+      if (err?.message === "Timeout" || err?.response?.status === 401) {
+        console.warn("Real chats load pending/timed out:", err?.message || err);
+      } else {
+        console.warn("Failed to load real chats", err);
       }
-      return [];
+      return localChatList;
     } finally {
       setIsChatsLoading(false);
     }
@@ -3976,6 +3981,10 @@ export default function Chats({
       
       if (res) {
         playNotificationSound('messageSent');
+        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+        const serverTime = serverSentAt 
+          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         
         // Replace localMessage with server response
         setMessages(prev => {
@@ -3983,7 +3992,8 @@ export default function Chats({
             ...m,
             id: (res.id || res.Id)?.toString(),
             text: res.content || res.Content || txt,
-            time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            time: serverTime,
+            sentAt: serverSentAt || m.sentAt,
             replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
             replyTo: res.replyTo || res.ReplyTo || currentReplyTo,
             pending: false
@@ -3991,6 +4001,30 @@ export default function Chats({
           saveData(STORES.MESSAGES, { chatId: activeChat.id, list: next }).catch(() => {});
           return next;
         });
+
+        if (serverSentAt && activeChat) {
+          setLocalChatList(prevList => {
+            let updatedItem: any = null;
+            const nextList = prevList.map(c => {
+              if (c.id === activeChat.id) {
+                updatedItem = {
+                  ...c,
+                  lastMessage: getDescriptiveLastMessage(res) || txt,
+                  time: formatLastMessageTime(serverSentAt),
+                  lastMessageSenderId: currentUserId || 0,
+                  lastMessageSentAt: serverSentAt
+                };
+                saveData(STORES.CHATS, updatedItem).catch(() => {});
+                return updatedItem;
+              }
+              return c;
+            });
+            if (updatedItem) {
+              return [updatedItem, ...nextList.filter(c => c.id !== activeChat.id)];
+            }
+            return nextList;
+          });
+        }
       } else {
         // Fallback: Remove temporary message if sending failed
         setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -4105,14 +4139,19 @@ export default function Chats({
               try {
                 const res = await sendMessage(body);
                 if (res) {
+                  const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+                  const serverTime = serverSentAt
+                    ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                    : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
                   setMessages(prev => {
                     const msgId = (res.id || res.Id)?.toString();
                     if (!msgId || prev.some(m => m.id === msgId)) return prev;
                     const mapped = {
                       id: msgId,
                       text: res.content || res.Content || file.name,
-                      time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                      sentAt: res.sentAt || res.SentAt || new Date().toISOString(),
+                      time: serverTime,
+                      sentAt: serverSentAt || new Date().toISOString(),
                       isMe: true,
                       senderName: res.senderName || res.SenderName || 'You',
                       type: res.type === MessageType.Image ? 'image' : res.type === MessageType.Audio ? 'audio' : 'text',
@@ -4123,6 +4162,31 @@ export default function Chats({
                     saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
                     return next;
                   });
+
+                  if (serverSentAt && activeChat) {
+                    setLocalChatList(prevList => {
+                      let updatedItem: any = null;
+                      const nextList = prevList.map(c => {
+                        if (c.id === activeChat.id) {
+                          updatedItem = {
+                            ...c,
+                            lastMessage: getDescriptiveLastMessage(res) || file.name,
+                            time: formatLastMessageTime(serverSentAt),
+                            lastMessageSenderId: currentUserId || 0,
+                            lastMessageSentAt: serverSentAt
+                          };
+                          saveData(STORES.CHATS, updatedItem).catch(() => {});
+                          return updatedItem;
+                        }
+                        return c;
+                      });
+                      if (updatedItem) {
+                        return [updatedItem, ...nextList.filter(c => c.id !== activeChat.id)];
+                      }
+                      return nextList;
+                    });
+                  }
+
                   setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
                 }
               } catch (err) {
@@ -4266,14 +4330,19 @@ export default function Chats({
       const res = await sendMessage(body);
       console.log('SendAttachment Dto Success:', res);
       if (res) {
+        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+        const serverTime = serverSentAt
+          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
         setMessages(prev => {
           // Replace tempId with server response
           const next = prev.map(m => m.id === tempId ? {
             ...m,
             id: (res.id || res.Id)?.toString(),
             text: res.content || res.Content || m.text,
-            time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: res.sentAt || res.SentAt || m.sentAt,
+            time: serverTime,
+            sentAt: serverSentAt || m.sentAt,
             replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
             pending: false,
             mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : undefined,
@@ -4282,6 +4351,30 @@ export default function Chats({
           saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
+
+        if (serverSentAt && activeChat) {
+          setLocalChatList(prevList => {
+            let updatedItem: any = null;
+            const nextList = prevList.map(c => {
+              if (c.id === activeChat.id) {
+                updatedItem = {
+                  ...c,
+                  lastMessage: getDescriptiveLastMessage(res) || attachmentCaption,
+                  time: formatLastMessageTime(serverSentAt),
+                  lastMessageSenderId: currentUserId || 0,
+                  lastMessageSentAt: serverSentAt
+                };
+                saveData(STORES.CHATS, updatedItem).catch(() => {});
+                return updatedItem;
+              }
+              return c;
+            });
+            if (updatedItem) {
+              return [updatedItem, ...nextList.filter(c => c.id !== activeChat.id)];
+            }
+            return nextList;
+          });
+        }
       } else {
         // Mark failed or remove
         setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -4354,12 +4447,17 @@ export default function Chats({
       const res = await sendMessage(body);
       console.log('Send Voice Message Success', res);
       if (res) {
+        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+        const serverTime = serverSentAt
+          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
         setMessages(prev => {
           const next = prev.map(m => m.id === tempId ? {
             ...m,
             id: (res.id || res.Id)?.toString(),
-            time: new Date(res.sentAt || res.SentAt || new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            sentAt: res.sentAt || res.SentAt || m.sentAt,
+            time: serverTime,
+            sentAt: serverSentAt || m.sentAt,
             replyToMessageId: res.replyToMessageId || res.ReplyToMessageId || (currentReplyTo ? parseInt(currentReplyTo.id) : 0),
             pending: false,
             mediaUrl: res.attachments && res.attachments.length > 0 ? (res.attachments[0].fileUrl || res.attachments[0].filePath || res.attachments[0].FilePath) : m.mediaUrl,
@@ -4368,6 +4466,30 @@ export default function Chats({
           saveData(STORES.MESSAGES, { chatId: activeChat!.id, list: next }).catch(() => {});
           return next;
         });
+
+        if (serverSentAt && activeChat) {
+          setLocalChatList(prevList => {
+            let updatedItem: any = null;
+            const nextList = prevList.map(c => {
+              if (c.id === activeChat.id) {
+                updatedItem = {
+                  ...c,
+                  lastMessage: getDescriptiveLastMessage(res) || '🎙️ Voice note',
+                  time: formatLastMessageTime(serverSentAt),
+                  lastMessageSenderId: currentUserId || 0,
+                  lastMessageSentAt: serverSentAt
+                };
+                saveData(STORES.CHATS, updatedItem).catch(() => {});
+                return updatedItem;
+              }
+              return c;
+            });
+            if (updatedItem) {
+              return [updatedItem, ...nextList.filter(c => c.id !== activeChat.id)];
+            }
+            return nextList;
+          });
+        }
       } else {
         // Mark failed or remove
         setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -4822,13 +4944,53 @@ export default function Chats({
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, status: 'sending' } : m));
     setOverlayMessageId(null);
     try {
-      await sendMessage({
+      const res = await sendMessage({
           chatId: Number(activeChat.id),
           content: msg.text,
           type: msg.type === 'image' ? MessageType.Image : (msg.type === 'audio' ? MessageType.Audio : MessageType.Text),
           attachments: msg.attachments || []
       });
-      setMessages(prev => prev.filter(m => m.id !== msg.id));
+      if (res) {
+        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+        const serverTime = serverSentAt
+          ? new Date(serverSentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        setMessages(prev => prev.map(m => m.id === msg.id ? {
+          ...m,
+          id: (res.id || res.Id)?.toString() || m.id,
+          time: serverTime,
+          sentAt: serverSentAt || m.sentAt,
+          status: 'sent',
+          pending: false
+        } : m));
+
+        if (serverSentAt && activeChat) {
+          setLocalChatList(prevList => {
+            let updatedItem: any = null;
+            const nextList = prevList.map(c => {
+              if (c.id === activeChat.id) {
+                updatedItem = {
+                  ...c,
+                  lastMessage: getDescriptiveLastMessage(res) || msg.text,
+                  time: formatLastMessageTime(serverSentAt),
+                  lastMessageSenderId: currentUserId || 0,
+                  lastMessageSentAt: serverSentAt
+                };
+                saveData(STORES.CHATS, updatedItem).catch(() => {});
+                return updatedItem;
+              }
+              return c;
+            });
+            if (updatedItem) {
+              return [updatedItem, ...nextList.filter(c => c.id !== activeChat.id)];
+            }
+            return nextList;
+          });
+        }
+      } else {
+        setMessages(prev => prev.filter(m => m.id !== msg.id));
+      }
     } catch (e) {
       setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
     }
@@ -4857,12 +5019,39 @@ export default function Chats({
         });
       }
 
-      await sendMessage({
+      const res = await sendMessage({
         chatId: parsedChatId,
         content: messageToForward.text || '',
         type: msgTypeNum,
         attachments: apiAttachments
       });
+
+      if (res) {
+        const serverSentAt = res.sentAt || res.SentAt || res.createdAt || res.CreatedAt;
+        if (serverSentAt) {
+          setLocalChatList(prevList => {
+            let updatedItem: any = null;
+            const nextList = prevList.map(c => {
+              if (c.id === targetChatId) {
+                updatedItem = {
+                  ...c,
+                  lastMessage: getDescriptiveLastMessage(res) || messageToForward.text,
+                  time: formatLastMessageTime(serverSentAt),
+                  lastMessageSenderId: currentUserId || 0,
+                  lastMessageSentAt: serverSentAt
+                };
+                saveData(STORES.CHATS, updatedItem).catch(() => {});
+                return updatedItem;
+              }
+              return c;
+            });
+            if (updatedItem) {
+              return [updatedItem, ...nextList.filter(c => c.id !== targetChatId)];
+            }
+            return nextList;
+          });
+        }
+      }
 
       triggerToast(`Forwarded to ${targetChatName}!`);
     } catch (err) {
@@ -5244,7 +5433,7 @@ export default function Chats({
                         const displayName = foundChat?.name || log.chatName || log.ChatName || log.groupName || log.GroupName || partnerPerson?.name || partnerPerson?.Name || (partnerId ? `User ${partnerId}` : 'Secure Call');
                         return displayName.toLowerCase().includes(searchQuery.toLowerCase());
                       })
-                      .map((log: any) => {
+                      .map((log: any, logIdx: number) => {
                         const isIncoming = log.isIncoming || log.IsIncoming;
                         const isEnded = log.status === 3 || log.status === 'Ended' || Boolean(log.endedAt || log.EndedAt);
                         const isMissed = log.isMissed || log.IsMissed || log.status === 4 || log.status === 'Missed' || log.status === 5 || log.status === 'Rejected';
@@ -5295,7 +5484,7 @@ export default function Chats({
 
                         return (
                           <div 
-                            key={log.id || log.Id}
+                            key={log.id ? `call-log-${log.id}` : log.Id ? `call-log-${log.Id}` : `call-log-idx-${logIdx}`}
                             className="flex items-start justify-between p-4 border-b border-zinc-100 hover:bg-zinc-50 transition-colors gap-3"
                           >
                             <div className="flex items-start gap-3 flex-1 min-w-0">
@@ -5425,9 +5614,9 @@ export default function Chats({
                 [...localChatList]
                   .filter(chat => chat.name.toLowerCase().includes(searchQuery.toLowerCase()))
                   .sort((a, b) => new Date(b.lastMessageSentAt || 0).getTime() - new Date(a.lastMessageSentAt || 0).getTime())
-                  .map(chat => (
+                  .map((chat, idx) => (
                   <div 
-                    key={chat.id} 
+                    key={chat.id ? `chat-item-${chat.id}` : `chat-item-idx-${idx}`} 
                     onClick={async () => {
                        setActiveChat(chat);
                        try {
@@ -5809,7 +5998,7 @@ export default function Chats({
                   }
 
                   let lastDateStr = '';
-                  return filtered.map((msg) => {
+                  return filtered.map((msg, msgIdx) => {
                     const msgDate = msg.sentAt ? new Date(msg.sentAt) : new Date();
                     const msgDateStr = msgDate.toDateString();
                     const showDivider = msgDateStr !== lastDateStr;
@@ -5818,7 +6007,7 @@ export default function Chats({
                     const showUnreadBanner = firstUnreadId && String(msg.id) === firstUnreadId;
 
                     return (
-                      <React.Fragment key={msg.id}>
+                      <React.Fragment key={msg.id ? `msg-${msg.id}` : `msg-idx-${msgIdx}`}>
                         {showDivider && (
                           <div className="flex justify-center my-3 select-none animate-fade-in w-full">
                             <span className="bg-white/95 dark:bg-zinc-800/95 border border-zinc-200 dark:border-zinc-700 px-3 py-1 text-zinc-600 dark:text-zinc-300 text-[10px] font-bold rounded-full shadow-sm uppercase tracking-wider flex items-center gap-1.5">

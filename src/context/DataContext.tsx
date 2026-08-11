@@ -132,6 +132,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshData = useCallback(async () => {
     if (isFetchingRef.current) return;
+    if (!localStorage.getItem('auth_token')) {
+      setLoading(false);
+      return;
+    }
     isFetchingRef.current = true;
     
     try {
@@ -177,8 +181,12 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Parse actions
       const actionsData = actionsRes?.data ?? actionsRes?.Data ?? actionsRes?.result ?? actionsRes?.Result ?? actionsRes ?? [];
       setActions(Array.isArray(actionsData) ? actionsData : []);
-    } catch (err) {
-      console.error('Failed to load data in DataProvider:', err);
+    } catch (err: any) {
+      if (err?.response?.status === 401) {
+        console.warn('DataProvider authorization pending or token invalid (401)');
+      } else {
+        console.warn('Failed to load data in DataProvider:', err);
+      }
     } finally {
       setLoading(false);
       isFetchingRef.current = false;
