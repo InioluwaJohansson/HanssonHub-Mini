@@ -6408,6 +6408,7 @@ export default function Chats({
                   </div>
                 ) : (
                   <textarea 
+                    autoComplete="off"
                     ref={messageInputRef}
                     value={messageText}
                     onChange={(e) => {
@@ -6572,6 +6573,7 @@ export default function Chats({
                           <div className="w-full flex flex-col gap-1 text-left animate-fade-in">
                             <label className="text-[9px] text-zinc-400 font-extrabold uppercase tracking-widest">Description</label>
                             <textarea 
+                              autoComplete="off"
                               value={editGroupDescription} 
                               onChange={e => setEditGroupDescription(e.target.value)} 
                               placeholder="Describe this group chat room..."

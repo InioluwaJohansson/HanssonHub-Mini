@@ -648,7 +648,7 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                   <p className="font-bold text-emerald-600 dark:text-emerald-400 text-center">{successMsg}</p>
                 </div>
               ) : (
-                <form onSubmit={handlePasswordSubmit} noValidate className="flex flex-col gap-4">
+                <form autoComplete="off" onSubmit={handlePasswordSubmit} noValidate className="flex flex-col gap-4">
                   <ModalInput
                     label="Token"
                     type="text"
@@ -719,7 +719,7 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                   <p className="font-bold text-emerald-600 dark:text-emerald-400 text-center">{successMsg}</p>
                 </div>
               ) : (
-                <form onSubmit={handleAuthSubmit} noValidate className="flex flex-col gap-4">
+                <form autoComplete="off" onSubmit={handleAuthSubmit} noValidate className="flex flex-col gap-4">
                   <ModalInput
                     label="Token"
                     type="text"
