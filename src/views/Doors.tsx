@@ -47,6 +47,7 @@ export default function Doors() {
         <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
         <input 
           type="text" 
+          autoComplete="off"
           placeholder="Search doors by name..." 
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}

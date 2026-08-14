@@ -5320,6 +5320,7 @@ export default function Chats({
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={16} />
                 <input 
                   type="text" 
+                  autoComplete="off"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder={activeSidebarTab === 'chats' ? "Search chats" : "Search call logs"} 
@@ -5881,6 +5882,7 @@ export default function Chats({
                 <Search size={16} className="text-zinc-400 shrink-0" />
                 <input 
                   type="text"
+                  autoComplete="off"
                   placeholder="Search messages..."
                   value={messageSearchQuery}
                   onChange={(e) => setMessageSearchQuery(e.target.value)}
@@ -6075,6 +6077,7 @@ export default function Chats({
                               <div className="flex flex-col gap-2 min-w-[200px]">
                                 <input 
                                   type="text" 
+                                  autoComplete="off"
                                   value={editingText} 
                                   onChange={(e) => setEditingText(e.target.value)} 
                                   className="w-full text-xs p-1 border border-zinc-300 rounded focus:outline-none focus:border-emerald-500 text-black font-semibold"
@@ -6271,6 +6274,7 @@ export default function Chats({
                   <div className="bg-black/30 backdrop-blur-sm p-4 border-t border-white/10 flex items-center gap-3 pb-safe">
                     <input 
                       type="text" 
+                      autoComplete="off"
                       placeholder="Add an optional caption message..." 
                       className="flex-1 bg-black/40 border border-white/10 text-white rounded-full px-5 py-3 outline-none text-xs placeholder-zinc-400 focus:border-[#53bdeb] transition-colors"
                       value={attachmentCaption}
@@ -6557,6 +6561,7 @@ export default function Chats({
                             <label className="text-[9px] text-zinc-400 font-extrabold uppercase tracking-widest">Group Name</label>
                             <input 
                               type="text" 
+                              autoComplete="off"
                               value={editGroupName} 
                               onChange={e => setEditGroupName(e.target.value)} 
                               placeholder="Group Name"
@@ -6871,8 +6876,8 @@ export default function Chats({
                   )}
                 </div>
 
-                <input type="text" placeholder="Group Name (Required)" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="w-full py-2 bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none text-sm focus:outline-none transition-colors text-black font-semibold" />
-                <input type="text" placeholder="Description (Optional)" value={newGroupDescription} onChange={e => setNewGroupDescription(e.target.value)} className="w-full py-2 bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none text-sm focus:outline-none transition-colors text-black font-semibold" />
+                <input type="text" autoComplete="off" placeholder="Group Name (Required)" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} className="w-full py-2 bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none text-sm focus:outline-none transition-colors text-black font-semibold" />
+                <input type="text" autoComplete="off" placeholder="Description (Optional)" value={newGroupDescription} onChange={e => setNewGroupDescription(e.target.value)} className="w-full py-2 bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none text-sm focus:outline-none transition-colors text-black font-semibold" />
                 <div className="flex flex-col gap-2 w-full pt-1">
                   <label className="text-xs text-zinc-400 font-extrabold uppercase tracking-widest">Select Group Members</label>
                   <div className="grid grid-cols-1 gap-2 p-2 bg-zinc-50 border border-zinc-200 rounded-2xl">

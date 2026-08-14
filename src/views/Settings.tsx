@@ -7,6 +7,61 @@ import { rebuildHubConnections } from '../utils/signalr';
 import ConfirmAuthModal from '../components/ConfirmAuthModal';
 import { triggerHaptic } from '../utils/haptics';
 
+function ModalInput({
+  label,
+  type = "text",
+  value,
+  onChange,
+  placeholder,
+  error,
+  inputMode,
+  pattern,
+  maxLength
+}: {
+  label: string;
+  type?: string;
+  value: string;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  placeholder?: string;
+  error?: boolean;
+  inputMode?: "search" | "text" | "email" | "tel" | "url" | "numeric" | "decimal" | "none";
+  pattern?: string;
+  maxLength?: number;
+}) {
+  const [focused, setFocused] = useState(false);
+
+  return (
+    <div className="flex flex-col gap-1 w-full">
+      <div className="relative w-full">
+        <input
+          type={type}
+          value={value}
+          onChange={onChange}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          placeholder={placeholder}
+          inputMode={inputMode}
+          pattern={pattern}
+          maxLength={maxLength}
+          autoComplete="off"
+          className={`w-full bg-transparent text-slate-900 dark:text-zinc-100 py-2 px-1 text-sm rounded-none border-t-0 border-l-0 border-r-0 border-b-2 focus:outline-none focus:ring-0 transition-colors ${
+            error
+              ? 'border-red-500 dark:border-red-500'
+              : value
+              ? 'border-emerald-500 dark:border-emerald-500'
+              : 'border-slate-300 dark:border-zinc-700'
+          }`}
+        />
+        <div
+          className={`absolute bottom-0 left-0 h-[2px] bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 dark:from-blue-400 dark:via-indigo-400 dark:to-emerald-400 transition-all duration-1000 ease-in-out ${
+            focused ? 'w-full' : 'w-0'
+          }`}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function Settings({ onBack }: { onBack?: () => void, key?: string | React.Key }) {
   const userDetails = getUserDetails();
   const isOwner = String(userDetails?.RoleName || userDetails?.roleName || userDetails?.role || userDetails?.Role || '').toLowerCase() === 'owner';
@@ -306,49 +361,49 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative pb-6 overflow-y-auto">
-      <div className="p-5 flex flex-col gap-6 shrink-0 z-10 bg-slate-50">
+    <div className="flex flex-col h-full bg-slate-50 dark:bg-zinc-950 relative pb-6 overflow-y-auto">
+      <div className="p-5 flex flex-col gap-6 shrink-0 z-10 bg-slate-50 dark:bg-zinc-950">
         <div className="flex items-center justify-between mb-2">
           <div className="flex flex-col gap-1">
-            <h3 className="text-3xl font-black text-slate-800 flex items-center gap-2">
-              <SettingsIcon size={28} className="text-blue-600" /> Settings
+            <h3 className="text-3xl font-black text-slate-800 dark:text-zinc-100 flex items-center gap-2">
+              <SettingsIcon size={28} className="text-blue-600 dark:text-blue-400" /> Settings
             </h3>
-            <p className="text-xs text-slate-500 font-medium tracking-wide">Manage your app preferences</p>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium tracking-wide">Manage your app preferences</p>
           </div>
           {onBack && (
-            <button onClick={onBack} className="p-3 rounded-full hover:bg-slate-200 text-slate-600 transition-colors" title="Go Back">
+            <button onClick={onBack} className="p-3 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400 transition-colors" title="Go Back">
               <ChevronLeft size={24} />
             </button>
           )}
         </div>
         
         {/* Notifications Card */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col gap-4 transition-colors">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-indigo-50 text-indigo-600">
+            <div className="p-2 rounded-full bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400">
               <Bell size={24} />
             </div>
             <div>
-              <p className="font-bold text-slate-900 text-sm">Notification Management</p>
-              <p className="text-xs text-slate-500">Enable alerts for all security events</p>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Notification Management</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Enable alerts for all security events</p>
             </div>
           </div>
           
           <div className="flex items-center justify-between py-1 px-1">
-            <span className="text-xs font-bold text-slate-700">Push Notifications</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">Push Notifications</span>
             <button 
               onClick={toggleNotifications}
-              className={`w-12 h-6 rounded-full transition-colors relative ${notificationsEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
+              className={`w-12 h-6 rounded-full transition-colors relative ${notificationsEnabled ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-zinc-700'}`}
             >
               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${notificationsEnabled ? 'left-7' : 'left-1'}`} />
             </button>
           </div>
 
           <div className="flex items-center justify-between py-1 px-1">
-            <span className="text-xs font-bold text-slate-700">Sound Effects</span>
+            <span className="text-xs font-bold text-slate-700 dark:text-zinc-200">Sound Effects</span>
             <button 
               onClick={toggleSounds}
-              className={`w-12 h-6 rounded-full transition-colors relative ${soundsEnabled ? 'bg-indigo-500' : 'bg-slate-300'}`}
+              className={`w-12 h-6 rounded-full transition-colors relative ${soundsEnabled ? 'bg-indigo-500' : 'bg-slate-300 dark:bg-zinc-700'}`}
             >
               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${soundsEnabled ? 'left-7' : 'left-1'}`} />
             </button>
@@ -356,10 +411,10 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
         </div>
 
         {/* Dark Theme Card */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col gap-4 transition-colors">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full transition-colors ${darkEnabled ? 'bg-slate-800' : 'bg-slate-100'}`}>
+              <div className={`p-2 rounded-full transition-colors ${darkEnabled ? 'bg-slate-800 dark:bg-zinc-800' : 'bg-slate-100'}`}>
                 {darkEnabled ? (
                   <Moon size={24} className="text-amber-400" />
                 ) : (
@@ -367,34 +422,34 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                 )}
               </div>
               <div>
-                <p className="font-bold text-slate-900 text-sm">Dark Theme</p>
-                <p className="text-xs text-slate-500">Switch between dark and light themes</p>
+                <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Dark Theme</p>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">Switch between dark and light themes</p>
               </div>
             </div>
             <div>
               <button 
                 onClick={handleToggleDarkTheme}
-                className={`w-12 h-6 rounded-full transition-colors relative ${darkEnabled ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                className={`w-12 h-6 rounded-full transition-colors relative ${darkEnabled ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-zinc-700'}`}
               >
                 <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${darkEnabled ? 'left-7' : 'left-1'}`} />
               </button>
             </div>
           </div>
-          <div className="h-px bg-slate-100 w-full" />
+          <div className="h-px bg-slate-100 dark:bg-zinc-800 w-full" />
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-full transition-colors ${syncWithOs ? 'bg-indigo-100' : 'bg-slate-100'}`}>
-                <Globe size={24} className={syncWithOs ? "text-indigo-600" : "text-slate-400"} />
+              <div className={`p-2 rounded-full transition-colors ${syncWithOs ? 'bg-indigo-100 dark:bg-indigo-950/60' : 'bg-slate-100 dark:bg-zinc-800'}`}>
+                <Globe size={24} className={syncWithOs ? "text-indigo-600 dark:text-indigo-400" : "text-slate-400 dark:text-zinc-500"} />
               </div>
               <div>
-                <p className="font-bold text-slate-900 text-sm">Sync with OS Theme</p>
-                <p className="text-xs text-slate-500">Automatically match system appearance</p>
+                <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Sync with OS Theme</p>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">Automatically match system appearance</p>
               </div>
             </div>
             <div>
               <button 
                 onClick={handleToggleSyncWithOs}
-                className={`w-12 h-6 rounded-full transition-colors relative ${syncWithOs ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                className={`w-12 h-6 rounded-full transition-colors relative ${syncWithOs ? 'bg-indigo-600' : 'bg-slate-300 dark:bg-zinc-700'}`}
               >
                 <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${syncWithOs ? 'left-7' : 'left-1'}`} />
               </button>
@@ -402,21 +457,21 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-full transition-colors ${bioEnabled ? 'bg-blue-100' : 'bg-slate-100'}`}>
-              <Fingerprint size={24} className={bioEnabled ? 'text-blue-600' : 'text-slate-400'} />
+            <div className={`p-2 rounded-full transition-colors ${bioEnabled ? 'bg-blue-100 dark:bg-blue-950/60' : 'bg-slate-100 dark:bg-zinc-800'}`}>
+              <Fingerprint size={24} className={bioEnabled ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400 dark:text-zinc-500'} />
             </div>
             <div>
-              <p className="font-bold text-slate-900 text-sm">Fingerprint Login</p>
-              <p className="text-xs text-slate-500">Use biometric auth to login quickly</p>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Fingerprint Login</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Use biometric auth to login quickly</p>
             </div>
           </div>
           <div>
             <button 
               disabled={!bioAvailable}
               onClick={handleToggleBio}
-              className={`w-12 h-6 rounded-full transition-colors relative ${bioEnabled ? 'bg-blue-500' : 'bg-slate-300'}`}
+              className={`w-12 h-6 rounded-full transition-colors relative ${bioEnabled ? 'bg-blue-500' : 'bg-slate-300 dark:bg-zinc-700'}`}
             >
               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${bioEnabled ? 'left-7' : 'left-1'}`} />
             </button>
@@ -426,15 +481,15 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
         {/* Change Auth Code Card */}
         <button 
           onClick={() => { setShowAuthModal(true); setErrorMsg(''); setSuccessMsg(''); }}
-          className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:border-blue-300 transition-colors"
+          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-indigo-100">
-              <KeyRound size={24} className="text-indigo-600" />
+            <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-950/60">
+              <KeyRound size={24} className="text-indigo-600 dark:text-indigo-400" />
             </div>
             <div className="text-left">
-              <p className="font-bold text-slate-900 text-sm">Change Auth Code</p>
-              <p className="text-xs text-slate-500">Update your 6-digit PIN code</p>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Auth Code</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your 6-digit PIN code</p>
             </div>
           </div>
         </button>
@@ -442,28 +497,28 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
         {/* Change Password Card */}
         <button 
           onClick={() => { setShowPassModal(true); setErrorMsg(''); setSuccessMsg(''); }}
-          className="w-full bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center justify-between hover:border-blue-300 transition-colors"
+          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
         >
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-rose-100">
-              <Lock size={24} className="text-rose-600" />
+            <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60">
+              <Lock size={24} className="text-rose-600 dark:text-rose-400" />
             </div>
             <div className="text-left">
-              <p className="font-bold text-slate-900 text-sm">Change Password</p>
-              <p className="text-xs text-slate-500">Update your account password</p>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Password</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your account password</p>
             </div>
           </div>
         </button>
 
         {/* Chat Theme Card */}
-        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex flex-col gap-4 transition-colors">
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-blue-50 text-blue-600">
+            <div className="p-2 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
               <Palette size={24} />
             </div>
             <div>
-              <p className="font-bold text-slate-900 text-sm">Chat Bubble Theme</p>
-              <p className="text-xs text-slate-500">Select a color theme for your chat accents and send buttons</p>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Chat Bubble Theme</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Select a color theme for your chat accents and send buttons</p>
             </div>
           </div>
           
@@ -594,22 +649,41 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                 </div>
               ) : (
                 <form onSubmit={handlePasswordSubmit} noValidate className="flex flex-col gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Token</label>
-                    <input type="text" value={pToken} onChange={e => setPToken(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pToken ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={pAuthCode} onChange={e => setPAuthCode(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pAuthCode ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current 6-digit Code" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">New Password</label>
-                    <input type="password" value={pNewPass} onChange={e => setPNewPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pNewPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new password" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Confirm Password</label>
-                    <input type="password" value={pConfPass} onChange={e => setPConfPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${pAttempted && !pConfPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new password" />
-                  </div>
+                  <ModalInput
+                    label="Token"
+                    type="text"
+                    value={pToken}
+                    onChange={e => setPToken(e.target.value)}
+                    placeholder="Session Token"
+                    error={pAttempted && !pToken}
+                  />
+                  <ModalInput
+                    label="Authorization Code"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={pAuthCode}
+                    onChange={e => setPAuthCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Current 6-digit Code"
+                    error={pAttempted && !pAuthCode}
+                  />
+                  <ModalInput
+                    label="New Password"
+                    type="password"
+                    value={pNewPass}
+                    onChange={e => setPNewPass(e.target.value)}
+                    placeholder="Enter new password"
+                    error={pAttempted && !pNewPass}
+                  />
+                  <ModalInput
+                    label="Confirm Password"
+                    type="password"
+                    value={pConfPass}
+                    onChange={e => setPConfPass(e.target.value)}
+                    placeholder="Confirm new password"
+                    error={pAttempted && !pConfPass}
+                  />
                   
                   {errorMsg && <p className="text-xs font-bold text-red-500 text-center">{errorMsg}</p>}
                   
@@ -646,22 +720,44 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                 </div>
               ) : (
                 <form onSubmit={handleAuthSubmit} noValidate className="flex flex-col gap-4">
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Token</label>
-                    <input type="text" value={aToken} onChange={e => setAToken(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aToken ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Session Token" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Password</label>
-                    <input type="password" value={aPass} onChange={e => setAPass(e.target.value)} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aPass ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Current Account Password" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">New Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aNewAuth} onChange={e => setANewAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aNewAuth ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Enter new 6-digit code" />
-                  </div>
-                  <div>
-                    <label className="text-xs font-bold text-slate-600 dark:text-zinc-400 ml-1">Confirm Authorization Code</label>
-                    <input type="password" inputMode="numeric" pattern="[0-9]*" maxLength={6} value={aConfAuth} onChange={e => setAConfAuth(e.target.value.replace(/\D/g, ''))} className={`w-full mt-1 bg-slate-50 dark:bg-zinc-800 text-slate-900 dark:text-zinc-100 border ${aAttempted && !aConfAuth ? 'border-red-500' : 'border-slate-200 dark:border-zinc-700'} rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500`} placeholder="Confirm new 6-digit code" />
-                  </div>
+                  <ModalInput
+                    label="Token"
+                    type="text"
+                    value={aToken}
+                    onChange={e => setAToken(e.target.value)}
+                    placeholder="Session Token"
+                    error={aAttempted && !aToken}
+                  />
+                  <ModalInput
+                    label="Password"
+                    type="password"
+                    value={aPass}
+                    onChange={e => setAPass(e.target.value)}
+                    placeholder="Current Account Password"
+                    error={aAttempted && !aPass}
+                  />
+                  <ModalInput
+                    label="New Authorization Code"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={aNewAuth}
+                    onChange={e => setANewAuth(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Enter new 6-digit code"
+                    error={aAttempted && !aNewAuth}
+                  />
+                  <ModalInput
+                    label="Confirm Authorization Code"
+                    type="password"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    value={aConfAuth}
+                    onChange={e => setAConfAuth(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Confirm new 6-digit code"
+                    error={aAttempted && !aConfAuth}
+                  />
                   
                   {errorMsg && <p className="text-xs font-bold text-red-500 text-center">{errorMsg}</p>}
                   

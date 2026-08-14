@@ -69,6 +69,7 @@ export default function Logs() {
             <Calendar size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
             <input 
               type="date" 
+              autoComplete="off"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-slate-700 dark:text-zinc-200" 
@@ -96,6 +97,7 @@ export default function Logs() {
             <Calendar size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
             <input 
               type="date" 
+              autoComplete="off"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
               className="w-full pl-9 pr-3 py-2 text-xs font-bold bg-transparent border-none focus:outline-none focus:ring-0 text-slate-700 dark:text-zinc-200" 

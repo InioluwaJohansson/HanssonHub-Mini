@@ -16,8 +16,32 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   useEffect(() => {
     isBiometricAvailable().then(available => {
       setBiometricAvailable(available);
-      if (getBiometricStoredToken()) {
+      const token = getBiometricStoredToken();
+      if (token) {
         setHasStoredBiometric(true);
+        // Automatically prompt fingerprint verification on load if stored token exists in cache
+        setError('');
+        setIsLoading(true);
+        authenticateBiometric().then(async (success) => {
+          if (success && token) {
+            saveToken(token);
+            try {
+              const appNamesData = await getAppNamesIdList();
+              if (appNamesData) {
+                saveAppNamesList(appNamesData);
+              }
+            } catch (e) {
+              console.error("Failed to fetch app names id list");
+            }
+            onLogin();
+          } else {
+            setError('Fingerprint verification cancelled or failed.');
+            setIsLoading(false);
+          }
+        }).catch(() => {
+          setError('Fingerprint verification error.');
+          setIsLoading(false);
+        });
       }
     });
   }, []);
@@ -121,7 +145,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           <h2 className="text-xl font-bold mb-6 text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
             <LogIn size={24} className="text-zinc-500 dark:text-zinc-400" /> Sign in
           </h2>
-          <div className="space-y-7">
+          <form 
+            autoComplete="off" 
+            onSubmit={(e) => { e.preventDefault(); handleLogin(); }}
+            className="space-y-7"
+          >
             {/* Username Input */}
             <div className="flex flex-col gap-1.5 w-full">
               <label className="text-xs font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 peer-focus:text-black dark:peer-focus:text-white">
@@ -130,6 +158,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               </label>
               <input
                 type="text"
+                name="signin_username_no_autocomplete"
+                autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck="false"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 className={`w-full py-2 bg-transparent border-b-2 focus:outline-none text-zinc-900 dark:text-zinc-100 rounded-none ${error || (isSubmitted && !username) ? 'border-red-500' : username ? 'border-emerald-500' : 'border-zinc-300 dark:border-zinc-700'}`}
@@ -145,6 +178,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               <div className="relative flex items-center">
                 <input
                   type={showPassword ? "text" : "password"}
+                  name="signin_password_no_autocomplete"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className={`w-full py-2 pr-8 bg-transparent border-b-2 focus:outline-none text-zinc-900 dark:text-zinc-100 rounded-none ${error || (isSubmitted && !password) ? 'border-red-500' : password ? 'border-emerald-500' : 'border-zinc-300 dark:border-zinc-700'}`}
@@ -160,7 +198,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
 
             <div className="flex gap-2 mt-4">
               <button
-                onClick={handleLogin}
+                type="submit"
                 disabled={isLoading}
                 className={`flex items-center justify-center gap-2 bg-transparent text-zinc-900 dark:text-zinc-100 py-3 font-bold text-sm tracking-widest border-2 border-zinc-900 dark:border-zinc-100 rounded-md disabled:opacity-50 disabled:cursor-not-allowed ${hasStoredBiometric ? 'w-[80%]' : 'w-full'}`}
               >
@@ -170,6 +208,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
               
               {hasStoredBiometric && (
                 <button
+                  type="button"
                   onClick={handleBiometricLogin}
                   disabled={isLoading}
                   title="Login with Fingerprint"
@@ -183,7 +222,7 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
             {error && (
               <p className="text-red-500 text-xs text-center font-bold tracking-wide">{error}</p>
             )}
-          </div>
+          </form>
         </div>
       </div>
     </div>
