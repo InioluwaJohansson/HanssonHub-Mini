@@ -1,12 +1,19 @@
-import { useEffect, useState } from 'react';
-import { Camera, ShieldCheck, ShieldAlert, FileText, LayoutDashboard, DoorClosed, Play, Pause, LoaderCircle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Camera, ShieldCheck, ShieldAlert, FileText, LayoutDashboard, DoorClosed, Play, Pause, LoaderCircle, ChevronRight } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
 import { useData } from '../context/DataContext';
 import { motion } from 'motion/react';
 import { getImageUrl, activateDeactivateAction } from '../utils/api';
 import { formatRelativeTime } from '../utils/dateUtils';
+import { triggerHaptic } from '../utils/haptics';
+import { ViewType } from '../components/BottomNav';
 
-export default function Dashboard() {
+interface DashboardProps {
+  key?: React.Key;
+  onNavigate?: (view: ViewType) => void;
+}
+
+export default function Dashboard({ onNavigate }: DashboardProps) {
   const { logs, fetchLogs } = useLogs();
   const { doors, cameras, actions, loading, setActions } = useData();
   const [togglingActionId, setTogglingActionId] = useState<number | null>(null);
@@ -19,9 +26,11 @@ export default function Dashboard() {
 
   const handleToggleAction = async (actionId: number) => {
     if (togglingActionId !== null) return;
+    triggerHaptic('medium');
     setTogglingActionId(actionId);
     try {
       await activateDeactivateAction(actionId);
+      triggerHaptic('success');
       setActions(prev => prev.map(act => {
         const id = act.id ?? act.Id;
         if (id === actionId) {
@@ -31,6 +40,7 @@ export default function Dashboard() {
         return act;
       }));
     } catch (err) {
+      triggerHaptic('warning');
       console.error("Failed to toggle action from dashboard", err);
     } finally {
       setTogglingActionId(null);
@@ -64,7 +74,13 @@ export default function Dashboard() {
           initial={{ opacity: 0, scale: 0.95 }} 
           animate={{ opacity: 1, scale: 1 }} 
           transition={{ duration: 0.4, delay: 0.1 }}
-          className={`border p-4 flex items-center justify-between rounded-xl shadow-sm transition-colors duration-300 ${
+          onClick={() => {
+            if (onNavigate) {
+              triggerHaptic('medium');
+              onNavigate('facilities');
+            }
+          }}
+          className={`border p-4 flex items-center justify-between rounded-xl shadow-sm transition-all duration-300 ${onNavigate ? 'cursor-pointer hover:shadow-md active:scale-[0.99]' : ''} ${
             allDoorsLocked 
               ? 'border-emerald-100 bg-emerald-50/50 text-emerald-950' 
               : 'border-amber-100 bg-amber-50/50 text-amber-950'
@@ -95,7 +111,13 @@ export default function Dashboard() {
           initial={{ opacity: 0, scale: 0.95 }} 
           animate={{ opacity: 1, scale: 1 }} 
           transition={{ duration: 0.4, delay: 0.2 }}
-          className="border border-indigo-100 p-4 bg-indigo-50/50 flex items-center justify-between rounded-xl shadow-sm"
+          onClick={() => {
+            if (onNavigate) {
+              triggerHaptic('medium');
+              onNavigate('cameras');
+            }
+          }}
+          className={`border border-indigo-100 p-4 bg-indigo-50/50 flex items-center justify-between rounded-xl shadow-sm transition-all ${onNavigate ? 'cursor-pointer hover:shadow-md active:scale-[0.99]' : ''}`}
         >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white shadow-sm border border-indigo-100 flex items-center justify-center text-indigo-600 rounded-xl">
@@ -118,7 +140,13 @@ export default function Dashboard() {
           initial={{ opacity: 0, scale: 0.95 }} 
           animate={{ opacity: 1, scale: 1 }} 
           transition={{ duration: 0.4, delay: 0.3 }}
-          className="border border-purple-100 p-4 bg-purple-50/50 flex items-center justify-between rounded-xl shadow-sm"
+          onClick={() => {
+            if (onNavigate) {
+              triggerHaptic('medium');
+              onNavigate('doors');
+            }
+          }}
+          className={`border border-purple-100 p-4 bg-purple-50/50 flex items-center justify-between rounded-xl shadow-sm transition-all ${onNavigate ? 'cursor-pointer hover:shadow-md active:scale-[0.99]' : ''}`}
         >
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-white shadow-sm border border-purple-100 flex items-center justify-center text-purple-600 rounded-xl">

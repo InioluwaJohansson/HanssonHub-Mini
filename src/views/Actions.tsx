@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle } from 'lucide-react';
+import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllActions, activateDeactivateAction } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
@@ -7,7 +7,12 @@ import { triggerHaptic } from '../utils/haptics';
 
 import { useData, ActionData } from '../context/DataContext';
 
-export default function Actions() {
+interface ActionsProps {
+  key?: React.Key;
+  onBack?: () => void;
+}
+
+export default function Actions({ onBack }: ActionsProps) {
   const { actions, setActions, loading, refreshData } = useData();
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -32,6 +37,7 @@ export default function Actions() {
       const actId = Number(data?.actionId ?? data?.ActionId);
       const name = data?.actionName ?? data?.ActionName ?? `Action #${actId}`;
       
+      triggerHaptic('action');
       addToast(`Action "${name}" triggered!`, 'success');
       
       // Visual highlight effect
@@ -89,6 +95,7 @@ export default function Actions() {
     setTogglingId(actionId);
     try {
       await activateDeactivateAction(actionId);
+      triggerHaptic('success');
       
       // Toggle locally to give instant response
       setActions(prev => prev.map(act => {
@@ -125,11 +132,26 @@ export default function Actions() {
   return (
     <div className="p-5 flex flex-col gap-3 h-full overflow-y-auto relative pb-24">
       {/* View Header */}
-      <div className="flex flex-col gap-1 mb-3">
-        <h3 className="text-3xl font-black text-zinc-900 flex items-center gap-2">
-          <Play size={32} className="text-indigo-600" /> Actions
-        </h3>
-        <p className="text-xs text-zinc-500 font-medium tracking-wide">Automate and activate system-wide macros</p>
+      <div className="flex items-center gap-3 mb-2">
+        {onBack && (
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              onBack();
+            }}
+            className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
+            aria-label="Back to Facilities"
+            title="Back to Facilities"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <div className="flex flex-col">
+          <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+            <Play size={26} className="text-indigo-600" /> Actions
+          </h3>
+          <p className="text-xs text-zinc-500 font-medium tracking-wide">Automate and activate system-wide macros</p>
+        </div>
       </div>
 
       {/* Internal floating toasts */}

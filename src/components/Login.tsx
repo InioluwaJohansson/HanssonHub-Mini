@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Eye, EyeOff, User, Lock, LogIn, Shield, LoaderCircle, Fingerprint } from 'lucide-react';
+import { Eye, EyeOff, User, Lock, LogIn, LoaderCircle, Fingerprint } from 'lucide-react';
+import ShieldHLogo from './ShieldHLogo';
 import { loginUser, saveToken, saveUserDetails, getAppNamesIdList, saveAppNamesList } from '../utils/api';
 import { isBiometricAvailable, registerBiometric, authenticateBiometric, getBiometricStoredToken, saveBiometricStoredToken } from '../utils/biometrics';
+import { triggerHaptic } from '../utils/haptics';
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [showPassword, setShowPassword] = useState(false);
@@ -49,11 +51,13 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
   const handleBiometricLogin = async () => {
     setError('');
     setIsLoading(true);
+    triggerHaptic('medium');
     try {
       const success = await authenticateBiometric();
       if (success) {
         const t = getBiometricStoredToken();
         if (t) {
+          triggerHaptic('success');
           saveToken(t);
           
           // Fetch App names immediately after login
@@ -67,12 +71,15 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           onLogin();
           return;
         } else {
+          triggerHaptic('warning');
           setError('No stored token found for fingerprint.');
         }
       } else {
+        triggerHaptic('warning');
         setError('Fingerprint verification failed.');
       }
     } catch (e) {
+      triggerHaptic('warning');
       setError('Fingerprint verification error.');
     } finally {
       setIsLoading(false);
@@ -83,12 +90,14 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     setIsSubmitted(true);
     setError('');
     if (username && password) {
+      triggerHaptic('medium');
       setIsLoading(true);
       try {
         const response = await loginUser(username, password);
         const status = response?.status ?? response?.Status;
         const token = response?.token ?? response?.Token;
         if (status && token) {
+          triggerHaptic('success');
           saveToken(token);
           const userDetails = response?.data ?? response?.Data;
           if (userDetails) {
@@ -119,9 +128,11 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
           
           onLogin();
         } else {
+          triggerHaptic('warning');
           setError(response.message || 'Login failed');
         }
       } catch (err) {
+        triggerHaptic('warning');
         setError('An error occurred during login');
       } finally {
         setIsLoading(false);
@@ -135,8 +146,8 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
         
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-8 shadow-2xl rounded-xl">
           <h1 className="text-3xl tracking-tight text-zinc-900 dark:text-zinc-100 text-center mb-8 select-none flex justify-center items-center gap-3">
-            <div className="p-2 border-2 border-zinc-900 dark:border-zinc-100 rounded-xl flex-shrink-0 bg-transparent flex items-center justify-center">
-               <Shield size={22} className="text-zinc-900 dark:text-zinc-100" strokeWidth={2.5} fill="transparent" />
+            <div className="p-1.5 bg-black rounded-xl border border-zinc-700 shadow-md flex-shrink-0 flex items-center justify-center">
+              <ShieldHLogo size={24} />
             </div>
             <span>
               <span className="font-black text-zinc-900 dark:text-white">H</span><span className="font-medium tracking-tighter text-zinc-800 dark:text-zinc-300">ansson</span><span className="font-black text-zinc-900 dark:text-white">H</span><span className="font-medium tracking-tighter text-zinc-800 dark:text-zinc-300">ub</span>

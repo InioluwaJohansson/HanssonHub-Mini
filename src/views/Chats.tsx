@@ -3966,8 +3966,8 @@ export default function Chats({
 
   // Send message implementation (Text)
   const handleSendMessage = async () => {
-    triggerHaptic('light');
     if (!messageText.trim() || !activeChat) return;
+    triggerHaptic('send');
     const txt = messageText;
     const currentReplyTo = replyTo;
     
@@ -4005,6 +4005,7 @@ export default function Chats({
       const extracted = extractServerMessageData(res);
       
       if (extracted) {
+        triggerHaptic('success');
         playNotificationSound('messageSent');
         
         // Replace localMessage with server response
@@ -4047,10 +4048,12 @@ export default function Chats({
           });
         }
       } else {
+        triggerHaptic('error');
         // Fallback: Remove temporary message if sending failed
         setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err: any) {
+      triggerHaptic('error');
       console.error("Failed to send message via API:", err);
       // Remove temporary message if sending failed
       setMessages(prev => prev.filter(m => m.id !== tempId));
@@ -4343,12 +4346,14 @@ export default function Chats({
     setReplyTo(null);
 
     setIsSendingMessage(true);
+    triggerHaptic('send');
 
     try {
       const res = await sendMessage(body);
       console.log('SendAttachment Dto Success:', res);
       const extracted = extractServerMessageData(res);
       if (extracted) {
+        triggerHaptic('success');
         setMessages(prev => {
           // Replace tempId with server response
           const next = prev.map(m => m.id === tempId ? {
@@ -4390,10 +4395,12 @@ export default function Chats({
           });
         }
       } else {
+        triggerHaptic('error');
         // Mark failed or remove
         setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err) {
+      triggerHaptic('error');
       console.error("API error sending attachment, keeping optimistic with failed state:", err);
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, error: true, pending: false } : m));
     } finally {
@@ -4439,6 +4446,7 @@ export default function Chats({
 
     setMessages(prev => [...prev, optimisticMessage]);
     setReplyTo(null);
+    triggerHaptic('send');
     setTimeout(() => scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight), 100);
 
     try {
@@ -4463,6 +4471,7 @@ export default function Chats({
       console.log('Send Voice Message Success', res);
       const extracted = extractServerMessageData(res);
       if (extracted) {
+        triggerHaptic('success');
         setMessages(prev => {
           const next = prev.map(m => m.id === tempId ? {
             ...m,
@@ -4502,10 +4511,12 @@ export default function Chats({
           });
         }
       } else {
+        triggerHaptic('error');
         // Mark failed or remove
         setMessages(prev => prev.filter(m => m.id !== tempId));
       }
     } catch (err) {
+      triggerHaptic('error');
       console.error("API voice note err, local mock failed state:", err);
       setMessages(prev => prev.map(m => m.id === tempId ? { ...m, error: true, pending: false } : m));
     }
@@ -4577,7 +4588,7 @@ export default function Chats({
   };
 
   const deleteRecordingAudio = () => {
-    triggerHaptic('medium');
+    triggerHaptic('destructive');
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try {
         mediaRecorderRef.current.stop();
@@ -4644,7 +4655,7 @@ export default function Chats({
   };
 
   const sendRecordedVoiceMessage = async () => {
-    triggerHaptic('light');
+    triggerHaptic('send');
     if (recordingState === 'recording') {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
         mediaRecorderRef.current.onstop = async () => {
@@ -4750,6 +4761,7 @@ export default function Chats({
   // Delete Message Hook
   const handleDeleteMessageCheck = async (msgIdStr: string) => {
     if (!activeChat) return;
+    triggerHaptic('destructive');
     const msgId = parseInt(msgIdStr);
     if (isNaN(msgId)) {
       // Local removal only if it is a random generated mock ID
@@ -4952,6 +4964,7 @@ export default function Chats({
   };
 
   const handleResendMessage = async (msg: any) => {
+    triggerHaptic('send');
     setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, status: 'sending' } : m));
     setOverlayMessageId(null);
     try {
@@ -4963,6 +4976,7 @@ export default function Chats({
       });
       const extracted = extractServerMessageData(res);
       if (extracted) {
+        triggerHaptic('success');
         setMessages(prev => prev.map(m => m.id === msg.id ? {
           ...m,
           id: extracted.id || m.id,
@@ -4996,15 +5010,18 @@ export default function Chats({
           });
         }
       } else {
+        triggerHaptic('error');
         setMessages(prev => prev.filter(m => m.id !== msg.id));
       }
     } catch (e) {
+      triggerHaptic('error');
       setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, status: 'failed' } : m));
     }
   };
 
   const handleForwardMessage = async (targetChatId: string) => {
     if (!messageToForward) return;
+    triggerHaptic('send');
     
     const parsedChatId = parseInt(targetChatId);
     const targetChatInfo = localChatList.find(c => c.id === targetChatId);
@@ -5035,6 +5052,7 @@ export default function Chats({
 
       const extracted = extractServerMessageData(res);
       if (extracted) {
+        triggerHaptic('success');
         setLocalChatList(prevList => {
           let updatedItem: any = null;
           const nextList = prevList.map(c => {

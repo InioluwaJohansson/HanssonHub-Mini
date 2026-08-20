@@ -1,10 +1,16 @@
-import { useState, useEffect } from 'react';
-import { Maximize2, X, Video, Search, LoaderCircle, Calendar, PlayCircle, Settings, Film } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Maximize2, X, Video, Search, LoaderCircle, Calendar, PlayCircle, Settings, Film, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import HLSPlayer from '../components/HLSPlayer';
 import { useData, CameraData } from '../context/DataContext';
+import { triggerHaptic } from '../utils/haptics';
 
-export default function Cameras() {
+interface CamerasProps {
+  key?: React.Key;
+  onBack?: () => void;
+}
+
+export default function Cameras({ onBack }: CamerasProps) {
   const { cameras, loading } = useData();
   const [expandedCam, setExpandedCam] = useState<CameraData | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -54,11 +60,26 @@ export default function Cameras() {
   return (
     <>
       <div className="p-5 flex flex-col gap-4">
-        <div className="flex flex-col gap-1 mb-2">
-          <h3 className="text-3xl font-black text-zinc-900 flex items-center gap-2">
-            <Video size={32} className="text-purple-600" /> Cameras
-          </h3>
-          <p className="text-xs text-zinc-500 font-medium tracking-wide">Surveillance and recording control terminal</p>
+        <div className="flex items-center gap-3 mb-2">
+          {onBack && (
+            <button
+              onClick={() => {
+                triggerHaptic('light');
+                onBack();
+              }}
+              className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
+              aria-label="Back to Facilities"
+              title="Back to Facilities"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          <div className="flex flex-col">
+            <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+              <Video size={26} className="text-purple-600" /> Cameras
+            </h3>
+            <p className="text-xs text-zinc-500 font-medium tracking-wide">Surveillance and recording control terminal</p>
+          </div>
         </div>
         
         <div className="relative mb-2">

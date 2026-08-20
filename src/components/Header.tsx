@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { User, LogOut, Shield, Settings } from 'lucide-react';
+import { User, LogOut, Settings } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ViewType } from './BottomNav';
 import { getUserDetails, getImageUrl, getStoredAppNamesList } from '../utils/api';
+import ShieldHLogo from './ShieldHLogo';
 
 export function Header({ onLogout, setView }: { onLogout: () => void, setView: (v: ViewType) => void }) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -54,7 +55,9 @@ export function Header({ onLogout, setView }: { onLogout: () => void, setView: (
   return (
     <header className="h-16 px-6 flex items-center justify-between bg-white shrink-0 relative z-40 shadow-[0_4px_0_0_#000]">
       <div className="text-xl text-zinc-900 select-none flex items-center tracking-tight gap-2.5">
-        <Shield size={20} className="text-black" strokeWidth={2.5} fill="transparent" />
+        <div className="p-1 bg-black rounded-lg border border-zinc-700 shadow-sm flex items-center justify-center">
+          <ShieldHLogo size={18} />
+        </div>
         <span><span className="font-black text-black">H</span><span className="font-bold tracking-tighter">ansson</span><span className="font-black text-black">H</span><span className="font-bold tracking-tighter">ub</span></span>
       </div>
       

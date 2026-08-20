@@ -1,29 +1,40 @@
-import { useState } from 'react';
-import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle, ArrowLeft } from 'lucide-react';
 import { motion } from 'motion/react';
 import { lockDoor, unlockDoor } from '../utils/api';
 import { useData } from '../context/DataContext';
 import { triggerHaptic } from '../utils/haptics';
 
-export default function Doors() {
+interface DoorsProps {
+  key?: React.Key;
+  onBack?: () => void;
+}
+
+export default function Doors({ onBack }: DoorsProps) {
   const { doors, loading } = useData();
   const [searchQuery, setSearchQuery] = useState('');
 
-  const toggleLock = async (id: string) => {
+  const toggleLock = async (door: any) => {
     try {
-      triggerHaptic('heavy');
-      await lockDoor(id);
+      triggerHaptic(door.isLocked ? 'unlock' : 'lock');
+      // Lock & Unlock call PUT /Door/LockDoor?id={id}
+      await lockDoor(door.id);
+      triggerHaptic('success');
     } catch (err) {
-      console.error("Failed to toggle lock for door", id, err);
+      triggerHaptic('warning');
+      console.error("Failed to toggle lock for door", door.id, err);
     }
   };
 
-  const toggleOpen = async (id: string) => {
+  const toggleOpen = async (door: any) => {
     try {
-      triggerHaptic('medium');
-      await unlockDoor(id);
+      triggerHaptic(door.isOpen ? 'lock' : 'unlock');
+      // Open & Close call PUT /Door/UnlockDoor?id={id}
+      await unlockDoor(door.id);
+      triggerHaptic('success');
     } catch (err) {
-      console.error("Failed to toggle open/close for door", id, err);
+      triggerHaptic('warning');
+      console.error("Failed to toggle open/close for door", door.id, err);
     }
   };
 
@@ -38,9 +49,26 @@ export default function Doors() {
 
   return (
     <div className="p-5 flex flex-col gap-3">
-      <div className="flex flex-col gap-1 mb-3">
-        <h3 className="text-3xl font-black text-zinc-900 flex items-center gap-2"><DoorClosed size={32} className="text-amber-500" /> Doors</h3>
-        <p className="text-xs text-zinc-500 font-medium tracking-wide">Manage secure access points</p>
+      <div className="flex items-center gap-3 mb-2">
+        {onBack && (
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              onBack();
+            }}
+            className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
+            aria-label="Back to Facilities"
+            title="Back to Facilities"
+          >
+            <ArrowLeft size={18} />
+          </button>
+        )}
+        <div className="flex flex-col">
+          <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+            <DoorClosed size={26} className="text-amber-500" /> Doors
+          </h3>
+          <p className="text-xs text-zinc-500 font-medium tracking-wide">Manage secure access points</p>
+        </div>
       </div>
       
       <div className="relative mb-2">
@@ -75,17 +103,17 @@ export default function Doors() {
                 </div>
                 <div className="flex gap-1">
                   <button 
-                    onClick={() => toggleLock(door.id)}
-                    className="p-1.5 flex items-center justify-center transition-all duration-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-800"
+                    onClick={() => toggleLock(door)}
+                    className="p-1.5 flex items-center justify-center transition-all duration-200 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-800 active:scale-95"
                     title={door.isLocked ? "Unlock Door" : "Lock Door"}
                   >
                     {door.isLocked ? <Unlock size={18} className="text-zinc-400" /> : <Lock size={18} className="text-red-500" />}
                   </button>
 
                   <button 
-                    onClick={() => toggleOpen(door.id)}
+                    onClick={() => toggleOpen(door)}
                     disabled={door.isLocked}
-                    className={`p-1.5 flex items-center justify-center transition-all duration-200 rounded-lg ${
+                    className={`p-1.5 flex items-center justify-center transition-all duration-200 rounded-lg active:scale-95 ${
                       door.isLocked 
                         ? 'text-zinc-200 dark:text-zinc-700 cursor-not-allowed opacity-40' 
                         : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800'

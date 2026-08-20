@@ -6,9 +6,11 @@ import Authorization from './views/Authorization';
 import { Header } from './components/Header';
 import { BottomNav, ViewType } from './components/BottomNav';
 import Dashboard from './views/Dashboard';
+import Facilities from './views/Facilities';
 import Doors from './views/Doors';
 import Actions from './views/Actions';
 import Cameras from './views/Cameras';
+import Externals from './views/Externals';
 import Chats from './views/Chats';
 import Settings from './views/Settings';
 import { startHomeSecurityHub, homeSecurityHubConnection, rebuildHubConnections } from './utils/signalr';
@@ -434,8 +436,8 @@ export default function App() {
       delete (window as any).__cachedCameras;
       clearStore(STORES.CAMERAS).catch(err => console.warn("Failed to clear cameras store on refresh:", err));
       refreshData().catch(err => console.warn("Failed to refresh cameras data:", err));
-    } else if (view === 'dashboard') {
-      refreshData().catch(err => console.warn("Failed to refresh dashboard data:", err));
+    } else if (view === 'facilities' || view === 'externals' || view === 'dashboard') {
+      refreshData().catch(err => console.warn("Failed to refresh data:", err));
     } else if (view === 'chats') {
       delete (window as any).__cachedChats;
       clearStore(STORES.CHATS).catch(err => console.warn("Failed to clear chats store on refresh:", err));
@@ -494,7 +496,7 @@ export default function App() {
 
   const changeViewWithTransition = (newView: ViewType) => {
     if (newView === currentView) return;
-    const viewsOrder: ViewType[] = ['dashboard', 'cameras', 'doors', 'chats', 'logs', 'settings'];
+    const viewsOrder: ViewType[] = ['dashboard', 'facilities', 'cameras', 'doors', 'actions', 'externals', 'chats', 'logs', 'settings'];
     const currentIndex = viewsOrder.indexOf(currentView);
     const newIndex = viewsOrder.indexOf(newView);
     const dir = newIndex > currentIndex ? 1 : -1;
@@ -613,8 +615,8 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-screen bg-zinc-100 flex items-center justify-center font-sans tracking-normal overflow-hidden select-none">
-      <div className="w-full h-[100dvh] md:w-full md:h-full landscape:w-full landscape:h-[100dvh] landscape:max-w-full landscape:max-h-full landscape:rounded-none landscape:border-none sm:w-[375px] sm:h-[667px] sm:max-h-[90vh] bg-white sm:rounded-[3rem] sm:shadow-[0_32px_64px_rgba(0,0,0,0.15)] overflow-hidden relative sm:border-[8px] sm:border-zinc-900 flex flex-col transition-all duration-300">
+    <div className="min-h-screen bg-zinc-950 flex items-center justify-center font-sans tracking-normal overflow-hidden select-none">
+      <div className="w-full max-w-[430px] h-[100dvh] sm:h-[880px] sm:max-h-[94vh] bg-white dark:bg-zinc-900 sm:rounded-[3rem] sm:shadow-[0_25px_60px_-15px_rgba(0,0,0,0.6)] overflow-hidden relative sm:border-[8px] sm:border-zinc-800 flex flex-col transition-all duration-300">
         
         {appState === 'splash' && (
           <Splash onComplete={() => {
@@ -728,10 +730,12 @@ export default function App() {
                     transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
                     className="w-full h-full flex flex-col"
                   >
-                    {currentView === 'dashboard' && <Dashboard key={`dash-${refreshKey}`} />}
-                    {currentView === 'doors' && <Doors key={`door-${refreshKey}`} />}
-                    {currentView === 'actions' && <Actions key={`action-${refreshKey}`} />}
-                    {currentView === 'cameras' && <Cameras key={`cam-${refreshKey}`} />}
+                    {currentView === 'dashboard' && <Dashboard key={`dash-${refreshKey}`} onNavigate={changeViewWithTransition} />}
+                    {currentView === 'facilities' && <Facilities key={`fac-${refreshKey}`} onNavigate={changeViewWithTransition} />}
+                    {currentView === 'doors' && <Doors key={`door-${refreshKey}`} onBack={() => changeViewWithTransition('facilities')} />}
+                    {currentView === 'actions' && <Actions key={`action-${refreshKey}`} onBack={() => changeViewWithTransition('facilities')} />}
+                    {currentView === 'cameras' && <Cameras key={`cam-${refreshKey}`} onBack={() => changeViewWithTransition('facilities')} />}
+                    {currentView === 'externals' && <Externals key={`ext-${refreshKey}`} onBack={() => changeViewWithTransition('facilities')} />}
                     {currentView === 'chats' && <div key={`chat-${refreshKey}`} className="contents"></div>}
                     {currentView === 'logs' && <Logs key={`log-${refreshKey}`} />}
                     {currentView === 'settings' && <Settings key={`set-${refreshKey}`} onBack={previousView ? () => changeViewWithTransition(previousView) : undefined} />}

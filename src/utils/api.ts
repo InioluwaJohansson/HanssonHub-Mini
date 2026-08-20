@@ -1,9 +1,10 @@
 import axios from 'axios';
 
 export const getBaseUrl = (): string => {
-  return localStorage.getItem('api_base_url') || 'https://kv5zhpcr-7190.uks1.devtunnels.ms';
+  return localStorage.getItem('api_base_url') || 'https://q9l0xpmb-7190.uks1.devtunnels.ms';
 };
-
+//https://kv5zhpcr-7190.uks1.devtunnels.ms
+//https://q9l0xpmb-7190.uks1.devtunnels.ms/
 export const saveBaseUrl = (url: string) => {
   const cleanUrl = url.trim().replace(/\/+$/, '');
   localStorage.setItem('api_base_url', cleanUrl);
@@ -168,7 +169,8 @@ api.interceptors.request.use((config) => {
 
 api.interceptors.response.use(
   (response) => {
-    const dateHeader = response.headers?.['date'] || response.headers?.get?.('date');
+    const headers = response.headers as any;
+    const dateHeader = headers?.['date'] || (typeof headers?.get === 'function' ? headers.get('date') : undefined);
     if (dateHeader) {
       updateServerTimeFromHeader(dateHeader);
     }
@@ -180,7 +182,8 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    const dateHeader = error.response?.headers?.['date'] || error.response?.headers?.get?.('date');
+    const headers = error.response?.headers as any;
+    const dateHeader = headers?.['date'] || (typeof headers?.get === 'function' ? headers.get('date') : undefined);
     if (dateHeader) {
       updateServerTimeFromHeader(dateHeader);
     }

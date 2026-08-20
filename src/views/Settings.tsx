@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { Fingerprint, Shield, Settings as SettingsIcon, KeyRound, Lock, X, LoaderCircle, CheckCircle, Moon, Sun, Globe, Check, Bell, ChevronLeft, Palette, Copy, Clock } from 'lucide-react';
+import { Fingerprint, Shield, Settings as SettingsIcon, KeyRound, Lock, X, LoaderCircle, CheckCircle, Moon, Sun, Globe, Check, Bell, ChevronLeft, Palette, Copy, Clock, Download, Smartphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isBiometricAvailable, authenticateBiometric, saveBiometricStoredToken, getBiometricStoredToken } from '../utils/biometrics';
 import { getToken, changePassword, changeAuthCode, getUserDetails, getBaseUrl, saveBaseUrl, api } from '../utils/api';
 import { rebuildHubConnections } from '../utils/signalr';
 import ConfirmAuthModal from '../components/ConfirmAuthModal';
 import { triggerHaptic } from '../utils/haptics';
+import { isStandaloneMode, canInstallPWA, promptPWAInstall, onInstallableChange } from '../utils/pwa';
 
 function ModalInput({
   label,
@@ -256,6 +257,32 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  const [isPwaInstalled, setIsPwaInstalled] = useState(() => isStandaloneMode());
+  const [canInstall, setCanInstall] = useState(false);
+  const [installStatus, setInstallStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsPwaInstalled(isStandaloneMode());
+    const unsubscribe = onInstallableChange((installable) => {
+      setCanInstall(installable);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleInstallPWA = async () => {
+    triggerHaptic('medium');
+    const outcome = await promptPWAInstall();
+    if (outcome === 'accepted') {
+      setInstallStatus('HanssonHub installed successfully!');
+      setIsPwaInstalled(true);
+      setCanInstall(false);
+      setTimeout(() => setInstallStatus(null), 3000);
+    } else if (outcome === 'dismissed') {
+      setInstallStatus('Installation dismissed');
+      setTimeout(() => setInstallStatus(null), 3000);
+    }
+  };
+
   useEffect(() => {
     isBiometricAvailable().then(avail => setBioAvailable(true));
     setBioEnabled(!!getBiometricStoredToken());
@@ -476,6 +503,46 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
               <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${bioEnabled ? 'left-7' : 'left-1'}`} />
             </button>
           </div>
+        </div>
+
+        {/* PWA App Installation Card */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-3 transition-colors">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className={`p-2 rounded-full transition-colors ${isPwaInstalled ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400' : 'bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'}`}>
+                {isPwaInstalled ? <Check size={24} /> : <Download size={24} />}
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">
+                  {isPwaInstalled ? 'Installed Application' : 'Install HanssonHub App'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  {isPwaInstalled 
+                    ? 'Running in fullscreen standalone app mode' 
+                    : 'Add to Home Screen or Desktop without browser address bar'}
+                </p>
+              </div>
+            </div>
+            {!isPwaInstalled && (
+              <button
+                onClick={handleInstallPWA}
+                className="px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 active:scale-95 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+              >
+                <Download size={14} />
+                <span>Install</span>
+              </button>
+            )}
+            {isPwaInstalled && (
+              <span className="px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 text-[11px] font-bold border border-emerald-200 dark:border-emerald-800">
+                Active
+              </span>
+            )}
+          </div>
+          {installStatus && (
+            <p className="text-xs font-semibold text-blue-600 dark:text-blue-400 text-center animate-fade-in">
+              {installStatus}
+            </p>
+          )}
         </div>
 
         {/* Change Auth Code Card */}
