@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { getAllDoorsByDoorType, getAllCameras, getAllActions } from '../utils/api';
+import { getAllDoorsByDoorType, getAllCameras, getAllActions, getAllExternals } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 import { saveData, getAllData, STORES } from '../utils/db';
 
@@ -50,19 +50,170 @@ export interface ActionData {
   ActionDescription?: string;
   actionActive?: boolean;
   ActionActive?: boolean;
+  isActive?: boolean;
+  IsActive?: boolean;
   getActionStepDtos?: Step[];
   GetActionStepDtos?: Step[];
+}
+
+export function parseActionSignalRPayload(...args: any[]): {
+  actionId: number | null;
+  isActive?: boolean;
+  actionName?: string;
+  actionDescription?: string;
+  raw?: any;
+} {
+  if (!args || args.length === 0) {
+    return { actionId: null };
+  }
+
+  let actionId: number | null = null;
+  let isActive: boolean | undefined = undefined;
+  let actionName: string | undefined = undefined;
+  let actionDescription: string | undefined = undefined;
+
+  const arg0 = args[0];
+  const arg1 = args[1];
+  const arg2 = args[2];
+
+  // 1. Check if first argument is a numeric ID
+  if (typeof arg0 === 'number') {
+    actionId = arg0;
+  } else if (typeof arg0 === 'string' && /^\d+$/.test(arg0.trim())) {
+    actionId = Number(arg0.trim());
+  }
+
+  // 2. Check if second argument is a boolean state (e.g. SignalR hub SendAsync("ActionActivationChanged", id, isActive))
+  if (typeof arg1 === 'boolean') {
+    isActive = arg1;
+  } else if (typeof arg1 === 'string' && (arg1.toLowerCase() === 'true' || arg1.toLowerCase() === 'false')) {
+    isActive = arg1.toLowerCase() === 'true';
+  } else if (typeof arg1 === 'number' && (arg1 === 0 || arg1 === 1)) {
+    isActive = arg1 === 1;
+  }
+
+  // 3. Check if third or second argument is an action name
+  if (typeof arg2 === 'string' && arg2.trim() !== '') {
+    actionName = arg2.trim();
+  } else if (typeof arg1 === 'string' && arg1.toLowerCase() !== 'true' && arg1.toLowerCase() !== 'false' && isNaN(Number(arg1))) {
+    actionName = arg1.trim();
+  }
+
+  // 4. Helper to inspect object payloads
+  const inspectObj = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return;
+
+    // Check nested wrappers like { data: { ... } } or { result: { ... } }
+    const target = (obj.data !== undefined && typeof obj.data === 'object' && obj.data !== null)
+      ? obj.data
+      : ((obj.result !== undefined && typeof obj.result === 'object' && obj.result !== null) ? obj.result : obj);
+
+    if (actionId === null) {
+      const rawId = target.id ?? target.Id ?? target.actionId ?? target.ActionId ?? obj.id ?? obj.Id ?? obj.actionId ?? obj.ActionId;
+      if (rawId !== undefined && !isNaN(Number(rawId)) && Number(rawId) > 0) {
+        actionId = Number(rawId);
+      }
+    }
+
+    if (isActive === undefined) {
+      if (typeof target.actionActive === 'boolean') isActive = target.actionActive;
+      else if (typeof target.ActionActive === 'boolean') isActive = target.ActionActive;
+      else if (typeof target.isActive === 'boolean') isActive = target.isActive;
+      else if (typeof target.IsActive === 'boolean') isActive = target.IsActive;
+      else if (typeof target.active === 'boolean') isActive = target.active;
+      else if (typeof target.Active === 'boolean') isActive = target.Active;
+      else if (typeof obj.actionActive === 'boolean') isActive = obj.actionActive;
+      else if (typeof obj.ActionActive === 'boolean') isActive = obj.ActionActive;
+      else if (typeof obj.isActive === 'boolean') isActive = obj.isActive;
+      else if (typeof obj.IsActive === 'boolean') isActive = obj.IsActive;
+      else if (typeof obj.result === 'boolean') isActive = obj.result;
+      else if (typeof obj.Result === 'boolean') isActive = obj.Result;
+      else if (typeof obj.data === 'boolean') isActive = obj.data;
+      else if (typeof obj.Data === 'boolean') isActive = obj.Data;
+    }
+
+    if (!actionName) {
+      actionName = target.actionName ?? target.ActionName ?? target.name ?? target.Name ?? obj.actionName ?? obj.ActionName;
+    }
+
+    if (!actionDescription) {
+      actionDescription = target.actionDescription ?? target.ActionDescription ?? target.description ?? target.Description ?? obj.actionDescription ?? obj.ActionDescription;
+    }
+  };
+
+  inspectObj(arg0);
+  inspectObj(arg1);
+
+  // If arg0 itself was a boolean (e.g. function called with boolean)
+  if (typeof arg0 === 'boolean' && isActive === undefined) {
+    isActive = arg0;
+  }
+
+  return {
+    actionId: actionId !== null && !isNaN(actionId) && actionId > 0 ? actionId : null,
+    isActive,
+    actionName,
+    actionDescription,
+    raw: arg0
+  };
+}
+
+export interface ExternalData {
+  id: number;
+  Id?: number;
+  externalName: string;
+  ExternalName?: string;
+  externalId?: string;
+  ExternalId?: string;
+  isTriggered: boolean;
+  IsTriggered?: boolean;
+  actionIds?: number[];
+  ActionIds?: number[];
+  isActive: boolean;
+  IsActive?: boolean;
+  powerActive?: boolean;
+  PowerActive?: boolean;
+  roomId?: number | null;
+  RoomId?: number | null;
+  roomName?: string | null;
+  RoomName?: string | null;
+  sectionId?: number | null;
+  SectionId?: number | null;
+  sectionName?: string | null;
+  SectionName?: string | null;
+  createdBy?: number;
+  CreatedBy?: number;
+  createdByName?: string;
+  CreatedByName?: string;
+  createdOn?: string;
+  CreatedOn?: string;
+  lastModifiedBy?: number;
+  LastModifiedBy?: number;
+  lastModifiedByName?: string;
+  LastModifiedByName?: string;
+  lastModifiedOn?: string | null;
+  LastModifiedOn?: string | null;
+  isDeleted?: boolean;
+  IsDeleted?: boolean;
+  personId?: number;
+  PersonId?: number;
+  peronName?: string;
+  PeronName?: string;
+  isHidden?: boolean;
+  IsHidden?: boolean;
 }
 
 interface DataContextType {
   doors: DoorData[];
   cameras: CameraData[];
   actions: ActionData[];
+  externals: ExternalData[];
   loading: boolean;
   refreshData: () => Promise<void>;
   setDoors: React.Dispatch<React.SetStateAction<DoorData[]>>;
   setCameras: React.Dispatch<React.SetStateAction<CameraData[]>>;
   setActions: React.Dispatch<React.SetStateAction<ActionData[]>>;
+  setExternals: React.Dispatch<React.SetStateAction<ExternalData[]>>;
 }
 
 const getDoorTypeString = (doorType: any) => {
@@ -114,6 +265,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [doors, setDoors] = useState<DoorData[]>([]);
   const [cameras, setCameras] = useState<CameraData[]>([]);
   const [actions, setActions] = useState<ActionData[]>([]);
+  const [externals, setExternals] = useState<ExternalData[]>([]);
   const [loading, setLoading] = useState(true);
   const isFetchingRef = useRef(false);
 
@@ -130,6 +282,10 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     (window as any).__cachedActions = actions;
   }, [actions]);
 
+  useEffect(() => {
+    (window as any).__cachedExternals = externals;
+  }, [externals]);
+
   const refreshData = useCallback(async () => {
     if (isFetchingRef.current) return;
     if (!localStorage.getItem('auth_token')) {
@@ -139,10 +295,14 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     isFetchingRef.current = true;
     
     try {
-      const [doorsRes, camerasRes, actionsRes] = await Promise.all([
+      const [doorsRes, camerasRes, actionsRes, externalsRes] = await Promise.all([
         getAllDoorsByDoorType(3),
         getAllCameras(),
-        getAllActions()
+        getAllActions(),
+        getAllExternals().catch(e => {
+          console.warn('Failed to load externals:', e);
+          return { data: [] };
+        })
       ]);
 
       // Parse doors
@@ -181,6 +341,35 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Parse actions
       const actionsData = actionsRes?.data ?? actionsRes?.Data ?? actionsRes?.result ?? actionsRes?.Result ?? actionsRes ?? [];
       setActions(Array.isArray(actionsData) ? actionsData : []);
+
+      // Parse externals
+      const rawExts = externalsRes?.data ?? externalsRes?.Data ?? externalsRes?.result ?? externalsRes?.Result ?? (Array.isArray(externalsRes) ? externalsRes : []);
+      if (Array.isArray(rawExts)) {
+        const mappedExts: ExternalData[] = rawExts.map((ext: any, index: number) => ({
+          id: Number(ext.id ?? ext.Id ?? index + 1),
+          externalName: ext.externalName ?? ext.ExternalName ?? `External ${ext.id ?? ext.Id ?? index + 1}`,
+          externalId: ext.externalId ?? ext.ExternalId ?? '',
+          isTriggered: ext.isTriggered ?? ext.IsTriggered ?? false,
+          actionIds: ext.actionIds ?? ext.ActionIds ?? [],
+          isActive: ext.isActive ?? ext.IsActive ?? false,
+          powerActive: ext.powerActive ?? ext.PowerActive ?? false,
+          roomId: ext.roomId ?? ext.RoomId ?? null,
+          roomName: ext.roomName ?? ext.RoomName ?? null,
+          sectionId: ext.sectionId ?? ext.SectionId ?? null,
+          sectionName: ext.sectionName ?? ext.SectionName ?? null,
+          createdBy: ext.createdBy ?? ext.CreatedBy,
+          createdByName: ext.createdByName ?? ext.CreatedByName,
+          createdOn: ext.createdOn ?? ext.CreatedOn,
+          lastModifiedBy: ext.lastModifiedBy ?? ext.LastModifiedBy,
+          lastModifiedByName: ext.lastModifiedByName ?? ext.LastModifiedByName,
+          lastModifiedOn: ext.lastModifiedOn ?? ext.LastModifiedOn,
+          isDeleted: ext.isDeleted ?? ext.IsDeleted ?? false,
+          isHidden: ext.isHidden ?? ext.IsHidden ?? false,
+          personId: ext.personId ?? ext.PersonId,
+          peronName: ext.peronName ?? ext.PeronName
+        }));
+        setExternals(mappedExts);
+      }
     } catch (err: any) {
       if (err?.response?.status === 401) {
         console.warn('DataProvider authorization pending or token invalid (401)');
@@ -366,56 +555,278 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
        });
     };
 
-    const handleActionCreated = () => {
-       getAllActions().then(res => {
-         const dataArray = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
-         setActions(Array.isArray(dataArray) ? dataArray : []);
-       });
+    const handleActionCreated = (...args: any[]) => {
+      console.log('[SignalR ActionCreated received]:', args);
+      getAllActions().then(res => {
+        const dataArray = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
+        setActions(Array.isArray(dataArray) ? dataArray : []);
+      }).catch(e => console.warn('SignalR handleActionCreated error:', e));
     };
 
-    const handleActionUpdated = () => {
-       getAllActions().then(res => {
-         const dataArray = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
-         setActions(Array.isArray(dataArray) ? dataArray : []);
-       });
+    const handleActionUpdated = (...args: any[]) => {
+      console.log('[SignalR ActionUpdated received]:', args);
+      const parsed = parseActionSignalRPayload(...args);
+      console.log('[SignalR ActionUpdated parsed]:', parsed);
+
+      if (parsed.actionId) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === parsed.actionId) {
+            return {
+              ...act,
+              ...(parsed.isActive !== undefined ? {
+                actionActive: parsed.isActive,
+                ActionActive: parsed.isActive,
+                isActive: parsed.isActive,
+                IsActive: parsed.isActive
+              } : {}),
+              actionName: parsed.actionName ?? act.actionName ?? act.ActionName,
+              ActionName: parsed.actionName ?? act.ActionName ?? act.actionName,
+              actionDescription: parsed.actionDescription ?? act.actionDescription ?? act.ActionDescription,
+              ActionDescription: parsed.actionDescription ?? act.ActionDescription ?? act.actionDescription
+            };
+          }
+          return act;
+        }));
+      }
+
+      getAllActions().then(res => {
+        const dataArray = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
+        if (Array.isArray(dataArray) && dataArray.length > 0) {
+          setActions(dataArray);
+        }
+      }).catch(e => console.warn('SignalR handleActionUpdated fetch error:', e));
     };
 
-    const handleActionActivationChanged = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
-      setActions(prev => prev.map(act => {
-        const currId = act.id ?? act.Id;
-        if (Number(currId) === actId) {
+    const handleActionActivationChanged = (...args: any[]) => {
+      console.log('[SignalR ActionActivationChanged received]:', args);
+      const parsed = parseActionSignalRPayload(...args);
+      console.log('[SignalR ActionActivationChanged parsed]:', parsed);
+
+      if (parsed.actionId && parsed.isActive !== undefined) {
+        const targetId = parsed.actionId;
+        const targetActive = parsed.isActive;
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === targetId) {
+            return {
+              ...act,
+              actionActive: targetActive,
+              ActionActive: targetActive,
+              isActive: targetActive,
+              IsActive: targetActive,
+              ...(parsed.actionName ? { actionName: parsed.actionName, ActionName: parsed.actionName } : {})
+            };
+          }
+          return act;
+        }));
+      }
+    };
+
+    const handleActionDeleted = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      const actId = parsed.actionId;
+      if (actId) {
+        setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
+      }
+    };
+
+    const handleActionTriggered = (...args: any[]) => {
+      console.log('[SignalR ActionTriggered received]:', args);
+      const parsed = parseActionSignalRPayload(...args);
+      const actId = parsed.actionId;
+      if (actId && parsed.isActive !== undefined) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === actId) {
+            return {
+              ...act,
+              actionActive: parsed.isActive!,
+              ActionActive: parsed.isActive!,
+              isActive: parsed.isActive!,
+              IsActive: parsed.isActive!
+            };
+          }
+          return act;
+        }));
+      }
+    };
+
+    const handleExternalCreated = (data: any) => {
+      getAllExternals().then(res => {
+        const rawExts = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? (Array.isArray(res) ? res : []);
+        if (Array.isArray(rawExts)) {
+          setExternals(rawExts.map((ext: any, index: number) => ({
+            id: Number(ext.id ?? ext.Id ?? index + 1),
+            externalName: ext.externalName ?? ext.ExternalName ?? `External ${ext.id ?? ext.Id ?? index + 1}`,
+            externalId: ext.externalId ?? ext.ExternalId ?? '',
+            isTriggered: ext.isTriggered ?? ext.IsTriggered ?? false,
+            actionIds: ext.actionIds ?? ext.ActionIds ?? [],
+            isActive: ext.isActive ?? ext.IsActive ?? false,
+            powerActive: ext.powerActive ?? ext.PowerActive ?? false,
+            roomId: ext.roomId ?? ext.RoomId ?? null,
+            roomName: ext.roomName ?? ext.RoomName ?? null,
+            sectionId: ext.sectionId ?? ext.SectionId ?? null,
+            sectionName: ext.sectionName ?? ext.SectionName ?? null,
+            createdBy: ext.createdBy ?? ext.CreatedBy,
+            createdByName: ext.createdByName ?? ext.CreatedByName,
+            createdOn: ext.createdOn ?? ext.CreatedOn,
+            lastModifiedBy: ext.lastModifiedBy ?? ext.LastModifiedBy,
+            lastModifiedByName: ext.lastModifiedByName ?? ext.LastModifiedByName,
+            lastModifiedOn: ext.lastModifiedOn ?? ext.LastModifiedOn,
+            isDeleted: ext.isDeleted ?? ext.IsDeleted ?? false,
+            isHidden: ext.isHidden ?? ext.IsHidden ?? false,
+            personId: ext.personId ?? ext.PersonId,
+            peronName: ext.peronName ?? ext.PeronName
+          })));
+        }
+      }).catch(err => console.warn('SignalR handleExternalCreated error:', err));
+    };
+
+    const handleExternalUpdated = (data: any) => {
+      console.log('[SignalR ExternalUpdated/ExternalsUpdated received]:', data);
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id ?? data.externalId ?? data.ExternalId);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      const isDeleted = Boolean(data.isDeleted ?? data.IsDeleted ?? false);
+
+      if (isDeleted) {
+        setExternals(prev => prev.filter(ext => ext.id !== targetId && (!targetExtId || ext.externalId !== targetExtId)));
+        return;
+      }
+
+      setExternals(prev => {
+        const exists = prev.some(ext => ext.id === targetId || (targetExtId && ext.externalId === targetExtId));
+        if (!exists && targetId) {
+          return [...prev, {
+            id: targetId,
+            externalName: data.externalName ?? data.ExternalName ?? `External #${targetId}`,
+            externalId: data.externalId ?? data.ExternalId ?? '',
+            isTriggered: data.isTriggered !== undefined ? Boolean(data.isTriggered) : (data.IsTriggered !== undefined ? Boolean(data.IsTriggered) : false),
+            isActive: data.isActive !== undefined ? Boolean(data.isActive) : (data.IsActive !== undefined ? Boolean(data.IsActive) : false),
+            powerActive: data.powerActive !== undefined ? Boolean(data.powerActive) : (data.PowerActive !== undefined ? Boolean(data.PowerActive) : true),
+            roomId: data.roomId ?? data.RoomId ?? null,
+            sectionId: data.sectionId ?? data.SectionId ?? null,
+            roomName: data.roomName ?? data.RoomName ?? null,
+            sectionName: data.sectionName ?? data.SectionName ?? null,
+            actionIds: data.actionIds ?? data.ActionIds ?? [],
+            createdBy: data.createdBy ?? data.CreatedBy,
+            createdByName: data.createdByName ?? data.CreatedByName,
+            createdOn: data.createdOn ?? data.CreatedOn,
+            lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy,
+            lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName,
+            lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn,
+            isDeleted: false,
+            isHidden: data.isHidden ?? data.IsHidden ?? false
+          }];
+        }
+
+        return prev.map(ext => {
+          if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
+            return {
+              ...ext,
+              externalName: data.externalName ?? data.ExternalName ?? ext.externalName,
+              externalId: data.externalId ?? data.ExternalId ?? ext.externalId,
+              isTriggered: data.isTriggered !== undefined ? Boolean(data.isTriggered) : (data.IsTriggered !== undefined ? Boolean(data.IsTriggered) : ext.isTriggered),
+              isActive: data.isActive !== undefined ? Boolean(data.isActive) : (data.IsActive !== undefined ? Boolean(data.IsActive) : ext.isActive),
+              powerActive: data.powerActive !== undefined ? Boolean(data.powerActive) : (data.PowerActive !== undefined ? Boolean(data.PowerActive) : ext.powerActive),
+              roomId: data.roomId !== undefined ? (data.roomId ?? data.RoomId) : ext.roomId,
+              sectionId: data.sectionId !== undefined ? (data.sectionId ?? data.SectionId) : ext.sectionId,
+              roomName: data.roomName ?? data.RoomName ?? ext.roomName,
+              sectionName: data.sectionName ?? data.SectionName ?? ext.sectionName,
+              actionIds: data.actionIds ?? data.ActionIds ?? ext.actionIds,
+              createdBy: data.createdBy ?? data.CreatedBy ?? ext.createdBy,
+              createdByName: data.createdByName ?? data.CreatedByName ?? ext.createdByName,
+              createdOn: data.createdOn ?? data.CreatedOn ?? ext.createdOn,
+              lastModifiedBy: data.lastModifiedBy ?? data.LastModifiedBy ?? ext.lastModifiedBy,
+              lastModifiedByName: data.lastModifiedByName ?? data.LastModifiedByName ?? ext.lastModifiedByName,
+              lastModifiedOn: data.lastModifiedOn ?? data.LastModifiedOn ?? ext.lastModifiedOn,
+              isHidden: data.isHidden !== undefined ? Boolean(data.isHidden ?? data.IsHidden) : ext.isHidden
+            };
+          }
+          return ext;
+        });
+      });
+
+      // Background sync to ensure full relational details like room and section names
+      getAllExternals().then(res => {
+        const rawExts = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? (Array.isArray(res) ? res : []);
+        if (Array.isArray(rawExts) && rawExts.length > 0) {
+          setExternals(rawExts.map((ext: any, index: number) => ({
+            id: Number(ext.id ?? ext.Id ?? index + 1),
+            externalName: ext.externalName ?? ext.ExternalName ?? `External ${ext.id ?? ext.Id ?? index + 1}`,
+            externalId: ext.externalId ?? ext.ExternalId ?? '',
+            isTriggered: ext.isTriggered ?? ext.IsTriggered ?? false,
+            actionIds: ext.actionIds ?? ext.ActionIds ?? [],
+            isActive: ext.isActive ?? ext.IsActive ?? false,
+            powerActive: ext.powerActive ?? ext.PowerActive ?? false,
+            roomId: ext.roomId ?? ext.RoomId ?? null,
+            roomName: ext.roomName ?? ext.RoomName ?? null,
+            sectionId: ext.sectionId ?? ext.SectionId ?? null,
+            sectionName: ext.sectionName ?? ext.SectionName ?? null,
+            createdBy: ext.createdBy ?? ext.CreatedBy,
+            createdByName: ext.createdByName ?? ext.CreatedByName,
+            createdOn: ext.createdOn ?? ext.CreatedOn,
+            lastModifiedBy: ext.lastModifiedBy ?? ext.LastModifiedBy,
+            lastModifiedByName: ext.lastModifiedByName ?? ext.LastModifiedByName,
+            lastModifiedOn: ext.lastModifiedOn ?? ext.LastModifiedOn,
+            isDeleted: ext.isDeleted ?? ext.IsDeleted ?? false,
+            isHidden: ext.isHidden ?? ext.IsHidden ?? false,
+            personId: ext.personId ?? ext.PersonId,
+            peronName: ext.peronName ?? ext.PeronName
+          })));
+        }
+      }).catch(err => console.warn('SignalR getAllExternals background fetch error:', err));
+    };
+
+    const handleExternalTriggered = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      const isTrig = data.isTriggered !== undefined ? Boolean(data.isTriggered) : (data.IsTriggered !== undefined ? Boolean(data.IsTriggered) : true);
+      const isAct = data.isActive !== undefined ? Boolean(data.isActive) : (data.IsActive !== undefined ? Boolean(data.IsActive) : undefined);
+
+      setExternals(prev => prev.map(ext => {
+        if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
           return {
-            ...act,
-            actionActive: isActive,
-            ActionActive: isActive
+            ...ext,
+            isTriggered: isTrig,
+            isActive: isAct !== undefined ? isAct : ext.isActive
           };
         }
-        return act;
+        return ext;
       }));
     };
 
-    const handleActionDeleted = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
-    };
+    const handleExternalActivationChanged = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      let isActive: boolean | undefined = undefined;
+      if (data?.isActive !== undefined) isActive = Boolean(data.isActive);
+      else if (data?.IsActive !== undefined) isActive = Boolean(data.IsActive);
+      
+      let isTriggered: boolean | undefined = undefined;
+      if (data?.isTriggered !== undefined) isTriggered = Boolean(data.isTriggered);
+      else if (data?.IsTriggered !== undefined) isTriggered = Boolean(data.IsTriggered);
 
-    const handleActionTriggered = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      if (isNaN(actId)) return;
-      const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
-      setActions(prev => prev.map(act => {
-        const currId = act.id ?? act.Id;
-        if (Number(currId) === actId) {
+      setExternals(prev => prev.map(ext => {
+        if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
           return {
-            ...act,
-            actionActive: isActive,
-            ActionActive: isActive
+            ...ext,
+            isActive: isActive !== undefined ? isActive : ext.isActive,
+            isTriggered: isTriggered !== undefined ? isTriggered : ext.isTriggered
           };
         }
-        return act;
+        return ext;
       }));
+    };
+
+    const handleExternalDeleted = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      setExternals(prev => prev.filter(ext => ext.id !== targetId && (!targetExtId || ext.externalId !== targetExtId)));
     };
 
     homeSecurityHubConnection.on("DoorCreated", handleDoorCreated);
@@ -431,6 +842,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     homeSecurityHubConnection.on("ActionActivationChanged", handleActionActivationChanged);
     homeSecurityHubConnection.on("ActionDeleted", handleActionDeleted);
     homeSecurityHubConnection.on("ActionTriggered", handleActionTriggered);
+    homeSecurityHubConnection.on("ExternalCreated", handleExternalCreated);
+    homeSecurityHubConnection.on("ExternalsCreated", handleExternalCreated);
+    homeSecurityHubConnection.on("ExternalUpdated", handleExternalUpdated);
+    homeSecurityHubConnection.on("ExternalsUpdated", handleExternalUpdated);
+    homeSecurityHubConnection.on("ExternalActivationChanged", handleExternalActivationChanged);
+    homeSecurityHubConnection.on("ExternalsActivationChanged", handleExternalActivationChanged);
+    homeSecurityHubConnection.on("ExternalTriggered", handleExternalTriggered);
+    homeSecurityHubConnection.on("ExternalsTriggered", handleExternalTriggered);
+    homeSecurityHubConnection.on("ExternalDeleted", handleExternalDeleted);
+    homeSecurityHubConnection.on("ExternalsDeleted", handleExternalDeleted);
 
     return () => {
       homeSecurityHubConnection.off("DoorCreated", handleDoorCreated);
@@ -446,11 +867,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       homeSecurityHubConnection.off("ActionActivationChanged", handleActionActivationChanged);
       homeSecurityHubConnection.off("ActionDeleted", handleActionDeleted);
       homeSecurityHubConnection.off("ActionTriggered", handleActionTriggered);
+      homeSecurityHubConnection.off("ExternalCreated", handleExternalCreated);
+      homeSecurityHubConnection.off("ExternalsCreated", handleExternalCreated);
+      homeSecurityHubConnection.off("ExternalUpdated", handleExternalUpdated);
+      homeSecurityHubConnection.off("ExternalsUpdated", handleExternalUpdated);
+      homeSecurityHubConnection.off("ExternalActivationChanged", handleExternalActivationChanged);
+      homeSecurityHubConnection.off("ExternalsActivationChanged", handleExternalActivationChanged);
+      homeSecurityHubConnection.off("ExternalTriggered", handleExternalTriggered);
+      homeSecurityHubConnection.off("ExternalsTriggered", handleExternalTriggered);
+      homeSecurityHubConnection.off("ExternalDeleted", handleExternalDeleted);
+      homeSecurityHubConnection.off("ExternalsDeleted", handleExternalDeleted);
     };
   }, []);
 
   return (
-    <DataContext.Provider value={{ doors, cameras, actions, loading, refreshData, setDoors, setCameras, setActions }}>
+    <DataContext.Provider value={{ doors, cameras, actions, externals, loading, refreshData, setDoors, setCameras, setActions, setExternals }}>
       {children}
     </DataContext.Provider>
   );

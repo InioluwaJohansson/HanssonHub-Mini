@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle, ArrowLeft } from 'lucide-react';
+import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle, ChevronLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllActions, activateDeactivateAction } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 import { triggerHaptic } from '../utils/haptics';
 
-import { useData, ActionData } from '../context/DataContext';
+import { useData, ActionData, parseActionSignalRPayload } from '../context/DataContext';
 
 interface ActionsProps {
   key?: React.Key;
@@ -32,11 +32,28 @@ export default function Actions({ onBack }: ActionsProps) {
   };
 
   useEffect(() => {
-    // Local SignalR listeners only for temporary UI visual feedback (toasts, highlights)
-    const handleActionTriggered = (data: any) => {
-      const actId = Number(data?.actionId ?? data?.ActionId);
-      const name = data?.actionName ?? data?.ActionName ?? `Action #${actId}`;
+    // Local SignalR listeners for UI feedback and real-time state synchronization
+    const handleActionTriggered = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      const actId = parsed.actionId;
+      const name = parsed.actionName ?? (actId ? `Action #${actId}` : 'Action');
       
+      if (actId && parsed.isActive !== undefined) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === actId) {
+            return {
+              ...act,
+              actionActive: parsed.isActive!,
+              ActionActive: parsed.isActive!,
+              isActive: parsed.isActive!,
+              IsActive: parsed.isActive!
+            };
+          }
+          return act;
+        }));
+      }
+
       triggerHaptic('action');
       addToast(`Action "${name}" triggered!`, 'success');
       
@@ -49,24 +66,74 @@ export default function Actions({ onBack }: ActionsProps) {
       }
     };
 
-    const handleActionCreated = (data: any) => {
-      const name = data?.actionName ?? data?.ActionName ?? 'New Action';
+    const handleActionCreated = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      const name = parsed.actionName ?? 'New Action';
       addToast(`New Action "${name}" created.`, 'info');
+      getAllActions().then(res => {
+        const dataArray = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? res ?? [];
+        if (Array.isArray(dataArray) && dataArray.length > 0) {
+          setActions(dataArray);
+        }
+      }).catch(e => console.warn(e));
     };
 
-    const handleActionUpdated = (data: any) => {
-      const name = data?.actionName ?? data?.ActionName ?? 'Action';
+    const handleActionUpdated = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      if (parsed.actionId) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === parsed.actionId) {
+            return {
+              ...act,
+              ...(parsed.isActive !== undefined ? {
+                actionActive: parsed.isActive,
+                ActionActive: parsed.isActive,
+                isActive: parsed.isActive,
+                IsActive: parsed.isActive
+              } : {}),
+              actionName: parsed.actionName ?? act.actionName ?? act.ActionName,
+              ActionName: parsed.actionName ?? act.ActionName ?? act.actionName,
+              actionDescription: parsed.actionDescription ?? act.actionDescription ?? act.ActionDescription,
+              ActionDescription: parsed.actionDescription ?? act.ActionDescription ?? act.actionDescription
+            };
+          }
+          return act;
+        }));
+      }
+      const name = parsed.actionName ?? (parsed.actionId ? `Action #${parsed.actionId}` : 'Action');
       addToast(`Action "${name}" details updated.`, 'info');
     };
 
-    const handleActionActivationChanged = (data: any) => {
-      const name = data?.actionName ?? data?.ActionName ?? 'Action';
-      const isActive = data?.isActive ?? data?.IsActive ?? data?.actionActive ?? data?.ActionActive ?? false;
-      addToast(`Action "${name}" is now ${isActive ? 'Active' : 'Inactive'}.`, 'info');
+    const handleActionActivationChanged = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      const actId = parsed.actionId;
+      if (actId && parsed.isActive !== undefined) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === actId) {
+            return {
+              ...act,
+              actionActive: parsed.isActive!,
+              ActionActive: parsed.isActive!,
+              isActive: parsed.isActive!,
+              IsActive: parsed.isActive!
+            };
+          }
+          return act;
+        }));
+        const name = parsed.actionName ?? `Action #${actId}`;
+        addToast(`Action "${name}" is now ${parsed.isActive ? 'Active' : 'Inactive'}.`, 'info');
+      }
     };
 
-    const handleActionDeleted = (data: any) => {
-      const name = data?.actionName ?? data?.ActionName ?? 'Action';
+    const handleActionDeleted = (...args: any[]) => {
+      const parsed = parseActionSignalRPayload(...args);
+      const actId = parsed.actionId;
+      if (actId) {
+        setActions(prev => prev.filter(act => Number(act.id ?? act.Id) !== actId));
+      }
+      const name = parsed.actionName ?? (actId ? `Action #${actId}` : 'Action');
       addToast(`Action "${name}" deleted.`, 'warn');
     };
 
@@ -84,34 +151,47 @@ export default function Actions({ onBack }: ActionsProps) {
       homeSecurityHubConnection.off('ActionActivationChanged', handleActionActivationChanged);
       homeSecurityHubConnection.off('ActionDeleted', handleActionDeleted);
     };
-  }, []);
+  }, [setActions]);
 
   const handleToggleActive = async (action: ActionData, e: React.MouseEvent) => {
     e.stopPropagation();
-    const actionId = action.id ?? action.Id;
-    if (!actionId || togglingId !== null) return;
+    const actionId = Number(action.id ?? action.Id);
+    if (!actionId || isNaN(actionId) || togglingId !== null) return;
 
     triggerHaptic('medium');
     setTogglingId(actionId);
     try {
-      await activateDeactivateAction(actionId);
-      triggerHaptic('success');
+      // 1. Dispatch toggle request to the backend. Do NOT blindly invert local state.
+      const response = await activateDeactivateAction(actionId);
       
-      // Toggle locally to give instant response
-      setActions(prev => prev.map(act => {
-        const currId = act.id ?? act.Id;
-        if (currId === actionId) {
-          const currentVal = act.actionActive ?? act.ActionActive ?? false;
-          return {
-            ...act,
-            actionActive: !currentVal,
-            ActionActive: !currentVal
-          };
+      // 2. Parse response from server if it returned the authoritative boolean state
+      const parsed = parseActionSignalRPayload(response);
+      if (parsed.actionId === actionId && parsed.isActive !== undefined) {
+        setActions(prev => prev.map(act => {
+          const currId = Number(act.id ?? act.Id);
+          if (currId === actionId) {
+            return {
+              ...act,
+              actionActive: parsed.isActive!,
+              ActionActive: parsed.isActive!,
+              isActive: parsed.isActive!,
+              IsActive: parsed.isActive!
+            };
+          }
+          return act;
+        }));
+      } else {
+        // Synchronize with database to ensure frontend state matches backend reality exactly
+        const refreshed = await getAllActions();
+        const dataArray = refreshed?.data ?? refreshed?.Data ?? refreshed?.result ?? refreshed?.Result ?? (Array.isArray(refreshed) ? refreshed : []);
+        if (Array.isArray(dataArray) && dataArray.length > 0) {
+          setActions(dataArray);
         }
-        return act;
-      }));
+      }
+      triggerHaptic('success');
     } catch (err) {
       console.error('Failed to toggle action status:', err);
+      triggerHaptic('warning');
       addToast('Failed to change action status', 'warn');
     } finally {
       setTogglingId(null);
@@ -132,26 +212,26 @@ export default function Actions({ onBack }: ActionsProps) {
   return (
     <div className="p-5 flex flex-col gap-3 h-full overflow-y-auto relative pb-24">
       {/* View Header */}
-      <div className="flex items-center gap-3 mb-2">
-        {onBack && (
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              onBack();
-            }}
-            className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
-            aria-label="Back to Facilities"
-            title="Back to Facilities"
-          >
-            <ArrowLeft size={18} />
-          </button>
-        )}
+      <div className="flex items-center justify-between gap-3 mb-2">
         <div className="flex flex-col">
           <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
             <Play size={26} className="text-indigo-600" /> Actions
           </h3>
           <p className="text-xs text-zinc-500 font-medium tracking-wide">Automate and activate system-wide macros</p>
         </div>
+        {onBack && (
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              onBack();
+            }}
+            className="p-3 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400 transition-colors"
+            aria-label="Go Back"
+            title="Go Back"
+          >
+            <ChevronLeft size={24} />
+          </button>
+        )}
       </div>
 
       {/* Internal floating toasts */}

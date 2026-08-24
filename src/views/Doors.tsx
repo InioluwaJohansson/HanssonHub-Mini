@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle, ArrowLeft } from 'lucide-react';
+import { DoorOpen, DoorClosed, Lock, Unlock, Search, LoaderCircle, ChevronLeft } from 'lucide-react';
 import { motion } from 'motion/react';
 import { lockDoor, unlockDoor } from '../utils/api';
 import { useData } from '../context/DataContext';
@@ -49,26 +49,26 @@ export default function Doors({ onBack }: DoorsProps) {
 
   return (
     <div className="p-5 flex flex-col gap-3">
-      <div className="flex items-center gap-3 mb-2">
-        {onBack && (
-          <button
-            onClick={() => {
-              triggerHaptic('light');
-              onBack();
-            }}
-            className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
-            aria-label="Back to Facilities"
-            title="Back to Facilities"
-          >
-            <ArrowLeft size={18} />
-          </button>
-        )}
+      <div className="flex items-center justify-between gap-3 mb-2">
         <div className="flex flex-col">
           <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
             <DoorClosed size={26} className="text-amber-500" /> Doors
           </h3>
           <p className="text-xs text-zinc-500 font-medium tracking-wide">Manage secure access points</p>
         </div>
+        {onBack && (
+          <button
+            onClick={() => {
+              triggerHaptic('light');
+              onBack();
+            }}
+            className="p-3 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400 transition-colors"
+            aria-label="Go Back"
+            title="Go Back"
+          >
+            <ChevronLeft size={24} />
+          </button>
+        )}
       </div>
       
       <div className="relative mb-2">

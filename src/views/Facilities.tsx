@@ -11,8 +11,7 @@ import {
   Activity, 
   Sun, 
   Lock, 
-  Layers,
-  ArrowUpRight
+  Layers
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useData } from '../context/DataContext';
@@ -25,10 +24,12 @@ interface FacilitiesProps {
 }
 
 export default function Facilities({ onNavigate }: FacilitiesProps) {
-  const { doors, cameras, actions } = useData();
+  const { doors, cameras, actions, externals } = useData();
 
   const allDoorsLocked = doors.length > 0 && doors.every(d => d.isLocked);
-  const activeActionsCount = actions.filter(a => a.actionActive ?? a.ActionActive ?? false).length;
+  const activeActionsCount = actions.filter(a => a.actionActive ?? a.ActionActive ?? a.isActive ?? a.IsActive ?? false).length;
+  const triggeredExternalsCount = externals.filter(e => e.isTriggered ?? e.IsTriggered).length;
+  const activeExternalsCount = externals.filter(e => e.isActive ?? e.IsActive).length;
 
   const handleCardClick = (view: ViewType) => {
     triggerHaptic('medium');
@@ -46,8 +47,7 @@ export default function Facilities({ onNavigate }: FacilitiesProps) {
       iconBg: 'bg-purple-50 dark:bg-purple-950/60 border-purple-200 dark:border-purple-800',
       description: 'Live RTSP/HLS video streams, high-definition camera feeds, PTZ controls, and saved motion recordings.',
       stats: [
-        { label: 'Cameras Online', value: cameras.length },
-        { label: 'Streaming Protocol', value: 'HLS / Live' }
+        { label: 'Cameras Online', value: cameras.length }
       ]
     },
     {
@@ -62,8 +62,7 @@ export default function Facilities({ onNavigate }: FacilitiesProps) {
       iconBg: 'bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800',
       description: 'Remote lock/unlock operations, door sensor telemetry, physical security zones, and entryway states.',
       stats: [
-        { label: 'Total Access Pts', value: doors.length },
-        { label: 'Overall State', value: allDoorsLocked ? 'Fully Secured' : 'Unlocked Zones' }
+        { label: 'Total Access Pts', value: doors.length }
       ]
     },
     {
@@ -76,28 +75,33 @@ export default function Facilities({ onNavigate }: FacilitiesProps) {
       iconBg: 'bg-indigo-50 dark:bg-indigo-950/60 border-indigo-200 dark:border-indigo-800',
       description: 'Trigger automated routines, emergency responses, multi-step macros, and security sequences.',
       stats: [
-        { label: 'Configured Routines', value: actions.length },
-        { label: 'Ready for Trigger', value: 'Instant Execution' }
+        { label: 'Configured Routines', value: actions.length }
       ]
     },
     {
       id: 'externals',
       title: 'External Facilities',
-      badge: 'Perimeter Armed',
-      badgeColor: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+      badge: triggeredExternalsCount > 0
+        ? `${triggeredExternalsCount} Triggered!`
+        : `${activeExternalsCount > 0 ? `${activeExternalsCount} Active` : 'Perimeter Armed'}`,
+      badgeColor: triggeredExternalsCount > 0
+        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300 border-rose-200 dark:border-rose-800 animate-pulse'
+        : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
       icon: Radio,
-      iconColor: 'text-emerald-600 dark:text-emerald-400',
-      iconBg: 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800',
+      iconColor: triggeredExternalsCount > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
+      iconBg: triggeredExternalsCount > 0 
+        ? 'bg-rose-50 dark:bg-rose-950/60 border-rose-200 dark:border-rose-800'
+        : 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800',
       description: 'Motorized vehicle gates, outdoor perimeter lighting, infrared boundary sensors, and external relays.',
       stats: [
-        { label: 'Gates & Barriers', value: '3 Controlled' },
-        { label: 'Boundary Status', value: 'Normal / Armed' }
+        { label: 'Total Externals', value: externals.length > 0 ? externals.length : '5 Devices' },
+        { label: 'Alert State', value: triggeredExternalsCount > 0 ? `${triggeredExternalsCount} Triggered` : 'All Clear' }
       ]
     }
   ];
 
   return (
-    <div className="p-5 flex flex-col gap-4 h-full overflow-y-auto relative pb-24">
+    <div className="p-5 flex flex-col gap-4">
       {/* Header */}
       <div className="flex flex-col gap-1 mb-1">
         <h3 className="text-3xl font-black text-zinc-900 dark:text-white flex items-center gap-2.5">
@@ -121,9 +125,6 @@ export default function Facilities({ onNavigate }: FacilitiesProps) {
             </p>
           </div>
         </div>
-        <span className="text-[10px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-          Online
-        </span>
       </div>
 
       {/* Module Cards Grid */}
@@ -172,9 +173,6 @@ export default function Facilities({ onNavigate }: FacilitiesProps) {
                     </span>
                   ))}
                 </div>
-                <span className="text-xs font-black text-purple-600 dark:text-purple-400 flex items-center gap-0.5 group-hover:translate-x-0.5 transition-transform">
-                  Open <ArrowUpRight size={14} />
-                </span>
               </div>
             </motion.div>
           );

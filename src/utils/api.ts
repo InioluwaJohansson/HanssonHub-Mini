@@ -487,6 +487,55 @@ export const activateDeactivateAction = async (id: number) => {
   return response.data;
 };
 
+export const getAllExternals = async () => {
+  const response = await api.post('/External/GetAllExternals', '');
+  return response.data;
+};
+
+export const updateExternal = async (external: any) => {
+  try {
+    const response = await api.put('/External/UpdateExternal', external);
+    return response.data;
+  } catch (err) {
+    try {
+      const response = await api.post('/External/UpdateExternal', external);
+      return response.data;
+    } catch (err2) {
+      const id = external.id ?? external.Id;
+      const response = await api.post(`/External/ActivateDeactivateExternal?id=${id}`, '');
+      return response.data;
+    }
+  }
+};
+
+export const activateDeactivateExternal = async (id: number | string, payload?: any) => {
+  if (payload) {
+    try {
+      const response = await api.put('/External/UpdateExternal', payload);
+      return response.data;
+    } catch (e) {
+      console.warn('UpdateExternal PUT failed, attempting ActivateDeactivateExternal fallback:', e);
+    }
+  }
+  try {
+    const response = await api.post(`/External/ActivateDeactivateExternal?id=${id}`, '');
+    return response.data;
+  } catch (err) {
+    try {
+      const response = await api.put(`/External/UpdateExternal`, payload || { id, isActive: false });
+      return response.data;
+    } catch (e) {
+      const response = await api.put(`/External/ToggleExternal?id=${id}`);
+      return response.data;
+    }
+  }
+};
+
+export const triggerExternal = async (id: number | string) => {
+  const response = await api.post(`/External/TriggerExternal?id=${id}`, '');
+  return response.data;
+};
+
 export const startCall = async (chatId: number, type: number) => {
   const response = await api.post('/Call/StartCall', { chatId, type });
   return response.data;

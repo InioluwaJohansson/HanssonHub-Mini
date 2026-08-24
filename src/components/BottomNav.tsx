@@ -46,7 +46,7 @@ export function BottomNav({ currentView, setView }: { currentView: ViewType, set
     <nav className="h-[72px] border-t border-black bg-white flex items-center justify-around px-2 pb-safe z-40 relative shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.02)]">
       <NavItem 
         icon={LayoutDashboard} 
-        label="Dash" 
+        label="Home" 
         activeColorClass="text-blue-600"
         active={currentView === 'dashboard'} 
         onClick={() => setView('dashboard')} 

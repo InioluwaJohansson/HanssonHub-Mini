@@ -1,329 +1,392 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  ArrowLeft, 
+  ChevronLeft, 
   Search, 
   Radio, 
   ShieldCheck, 
   ShieldAlert, 
-  Zap, 
-  Sun, 
-  Moon, 
-  Lock, 
-  Unlock, 
   Power, 
-  Sliders, 
   Activity, 
   AlertTriangle, 
-  Sparkles, 
   CheckCircle2, 
   RefreshCw,
-  Wind,
-  Droplets,
-  Thermometer,
-  Eye,
-  BellRing
+  BellRing,
+  Layers,
+  MapPin,
+  Flame,
+  ToggleLeft,
+  ToggleRight,
+  Shield,
+  LoaderCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { triggerHaptic } from '../utils/haptics';
+import { useData, ExternalData } from '../context/DataContext';
+import { activateDeactivateExternal, getAllExternals } from '../utils/api';
+import { homeSecurityHubConnection } from '../utils/signalr';
 
 interface ExternalsProps {
   key?: React.Key;
   onBack?: () => void;
 }
 
-interface ExternalDevice {
-  id: string;
-  name: string;
-  category: 'gates' | 'lighting' | 'sensors' | 'relays';
-  type: string;
-  status: 'active' | 'inactive' | 'open' | 'closed' | 'locked' | 'armed' | 'triggered';
-  isOn?: boolean;
-  isLocked?: boolean;
-  value?: string;
-  battery?: number;
-  lastActivity?: string;
-  location: string;
-}
-
-const INITIAL_DEVICES: ExternalDevice[] = [
+const FALLBACK_EXTERNALS: ExternalData[] = [
   {
-    id: 'ext-gate-1',
-    name: 'Main Driveway Gate',
-    category: 'gates',
-    type: 'Motorized Sliding Gate',
-    status: 'closed',
-    isLocked: true,
-    isOn: false,
-    value: 'Closed & Locked',
-    battery: 100,
-    lastActivity: '2 mins ago',
-    location: 'Front Entrance'
+    id: 1,
+    externalName: 'Main Perimeter Infrared Beam',
+    externalId: 'EXT-BEAM-01',
+    isTriggered: true,
+    isActive: true,
+    powerActive: true,
+    roomName: 'North Gate',
+    sectionName: 'Perimeter Outer Fence',
+    actionIds: [1, 3],
+    createdByName: 'Security Admin',
+    createdOn: new Date().toISOString()
   },
   {
-    id: 'ext-gate-2',
-    name: 'Pedestrian Turnstile',
-    category: 'gates',
-    type: 'Electronic Access Gate',
-    status: 'locked',
-    isLocked: true,
-    isOn: true,
-    value: 'RFID Reader Active',
-    battery: 98,
-    lastActivity: '12 mins ago',
-    location: 'East Walkway'
+    id: 2,
+    externalName: 'Vehicle Entrance Boom Barrier',
+    externalId: 'EXT-GATE-02',
+    isTriggered: false,
+    isActive: true,
+    powerActive: true,
+    roomName: 'Front Driveway',
+    sectionName: 'Entry Checkpoint',
+    actionIds: [2],
+    createdByName: 'System Admin',
+    createdOn: new Date().toISOString()
   },
   {
-    id: 'ext-gate-3',
-    name: 'North Service Barrier',
-    category: 'gates',
-    type: 'Automatic Boom Barrier',
-    status: 'closed',
-    isLocked: true,
-    isOn: false,
-    value: 'Auto-Close Enabled',
-    battery: 95,
-    lastActivity: '1 hour ago',
-    location: 'North Perimeter'
+    id: 3,
+    externalName: 'Courtyard High-Power Floodlight',
+    externalId: 'EXT-LIGHT-03',
+    isTriggered: false,
+    isActive: false,
+    powerActive: true,
+    roomName: 'Central Courtyard',
+    sectionName: 'Grounds Lighting',
+    actionIds: [],
+    createdByName: 'Facility Manager',
+    createdOn: new Date().toISOString()
   },
   {
-    id: 'ext-light-1',
-    name: 'Perimeter Floodlights',
-    category: 'lighting',
-    type: 'High-Output LED 8000lm',
-    status: 'active',
-    isOn: true,
-    value: 'Auto Motion Mode',
-    lastActivity: 'Active',
-    location: 'Outer Perimeter Fence'
+    id: 4,
+    externalName: 'East Boundary Motion Radar',
+    externalId: 'EXT-RADAR-04',
+    isTriggered: true,
+    isActive: false,
+    powerActive: true,
+    roomName: 'East Perimeter',
+    sectionName: 'Perimeter Outer Fence',
+    actionIds: [4],
+    createdByName: 'Security Admin',
+    createdOn: new Date().toISOString()
   },
   {
-    id: 'ext-light-2',
-    name: 'Driveway Courtyard Lights',
-    category: 'lighting',
-    type: 'Pathway Illumination',
-    status: 'active',
-    isOn: false,
-    value: 'Scheduled (Dusk-Dawn)',
-    lastActivity: 'Off',
-    location: 'Driveway & Entry'
-  },
-  {
-    id: 'ext-light-3',
-    name: 'Backyard Spotlights',
-    category: 'lighting',
-    type: 'Security Dual Floodlight',
-    status: 'active',
-    isOn: false,
-    value: 'PIR Motion Armed',
-    lastActivity: 'Off',
-    location: 'Rear Yard'
-  },
-  {
-    id: 'ext-sensor-1',
-    name: 'Boundary Infrared Beam',
-    category: 'sensors',
-    type: 'Dual Photoelectric Beam',
-    status: 'armed',
-    isOn: true,
-    value: 'Perimeter Clear',
-    battery: 92,
-    lastActivity: 'Normal',
-    location: 'North & East Boundary'
-  },
-  {
-    id: 'ext-sensor-2',
-    name: 'External Weather Station',
-    category: 'sensors',
-    type: 'Solar Weather Unit',
-    status: 'active',
-    isOn: true,
-    value: '22°C • 48% RH • 8 km/h NW',
-    battery: 99,
-    lastActivity: 'Just now',
-    location: 'Roof Mast'
-  },
-  {
-    id: 'ext-sensor-3',
-    name: 'Perimeter Siren & Strobe',
-    category: 'sensors',
-    type: '115dB High Siren',
-    status: 'armed',
-    isOn: true,
-    value: 'Armed & Ready',
-    battery: 100,
-    lastActivity: 'Self-test Passed',
-    location: 'Main Tower'
-  },
-  {
-    id: 'ext-relay-1',
-    name: 'Outdoor Power Socket Relay',
-    category: 'relays',
-    type: '16A Smart Relay',
-    status: 'active',
-    isOn: false,
-    value: 'Off',
-    lastActivity: 'Idle',
-    location: 'Pool & Garden Area'
-  },
-  {
-    id: 'ext-relay-2',
-    name: 'External Intercom Unit',
-    category: 'relays',
-    type: '2-Way HD Video Callbox',
-    status: 'active',
-    isOn: true,
-    value: 'Online • SIP Ready',
-    lastActivity: 'Standby',
-    location: 'Gate Post'
+    id: 5,
+    externalName: 'Emergency Perimeter Siren & Strobe',
+    externalId: 'EXT-SIREN-05',
+    isTriggered: false,
+    isActive: true,
+    powerActive: true,
+    roomName: 'Roof Mast',
+    sectionName: 'Alarm System',
+    actionIds: [1, 2, 4],
+    createdByName: 'Chief Engineer',
+    createdOn: new Date().toISOString()
   }
 ];
 
 export default function Externals({ onBack }: ExternalsProps) {
-  const [devices, setDevices] = useState<ExternalDevice[]>(() => {
-    const saved = localStorage.getItem('hanssonhub_external_devices');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return INITIAL_DEVICES;
-      }
-    }
-    return INITIAL_DEVICES;
-  });
-
+  const { externals, setExternals, loading, refreshData } = useData();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'gates' | 'lighting' | 'sensors' | 'relays'>('all');
-  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'all' | 'triggered' | 'active' | 'inactive'>('all');
+  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'info' | 'success' | 'warn' }[]>([]);
 
-  useEffect(() => {
-    localStorage.setItem('hanssonhub_external_devices', JSON.stringify(devices));
-  }, [devices]);
+  // If data context has loaded real externals from backend, use those; otherwise use fallback
+  const displayExternals = (externals && externals.length > 0) ? externals : FALLBACK_EXTERNALS;
 
   const addToast = (message: string, type: 'info' | 'success' | 'warn' = 'info') => {
-    const id = Math.random().toString(36).substr(2, 9);
+    const id = Math.random().toString(36).substring(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3500);
   };
 
-  const handleToggleGateLock = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    triggerHaptic('medium');
-    setTogglingId(id);
+  // SignalR event listeners for immediate UI sync
+  useEffect(() => {
+    const handleExternalTriggered = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id ?? data.externalId ?? data.ExternalId);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      const name = data.externalName ?? data.ExternalName ?? `External #${targetId}`;
+      const isTrig = data.isTriggered !== undefined ? Boolean(data.isTriggered) : (data.IsTriggered !== undefined ? Boolean(data.IsTriggered) : true);
+      const isAct = data.isActive !== undefined ? Boolean(data.isActive) : (data.IsActive !== undefined ? Boolean(data.IsActive) : undefined);
 
-    setTimeout(() => {
-      setDevices(prev => prev.map(dev => {
-        if (dev.id === id) {
-          const nextLocked = !dev.isLocked;
-          triggerHaptic(nextLocked ? 'lock' : 'unlock');
-          addToast(`${dev.name} is now ${nextLocked ? 'Locked' : 'Unlocked'}`, 'success');
+      setExternals(prev => prev.map(ext => {
+        if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
           return {
-            ...dev,
-            isLocked: nextLocked,
-            status: nextLocked ? 'locked' : (dev.isOn ? 'open' : 'closed'),
-            value: nextLocked ? 'Locked & Secured' : (dev.isOn ? 'Open' : 'Closed (Unlocked)')
+            ...ext,
+            isTriggered: isTrig,
+            isActive: isAct !== undefined ? isAct : ext.isActive,
+            IsActive: isAct !== undefined ? isAct : ext.isActive
           };
         }
-        return dev;
+        return ext;
       }));
-      setTogglingId(null);
-    }, 350);
-  };
 
-  const handleToggleGateOpen = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    triggerHaptic('action');
-    setTogglingId(id);
+      if (isTrig) {
+        triggerHaptic('action');
+        addToast(`Alert: ${name} is Triggered!`, 'warn');
+      } else {
+        addToast(`${name} trigger status cleared.`, 'info');
+      }
+    };
 
-    setTimeout(() => {
-      setDevices(prev => prev.map(dev => {
-        if (dev.id === id) {
-          const nextOpen = !dev.isOn;
-          triggerHaptic('success');
-          addToast(`${dev.name} ${nextOpen ? 'Opened' : 'Closed'}`, 'success');
+    const handleExternalActivationChanged = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id ?? data.externalId ?? data.ExternalId);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      const name = data.externalName ?? data.ExternalName ?? `External #${targetId}`;
+      
+      let isActive: boolean | undefined = undefined;
+      if (data?.isActive !== undefined) isActive = Boolean(data.isActive);
+      else if (data?.IsActive !== undefined) isActive = Boolean(data.IsActive);
+
+      let isTriggered: boolean | undefined = undefined;
+      if (data?.isTriggered !== undefined) isTriggered = Boolean(data.isTriggered);
+      else if (data?.IsTriggered !== undefined) isTriggered = Boolean(data.IsTriggered);
+
+      if (isActive !== undefined || isTriggered !== undefined) {
+        setExternals(prev => prev.map(ext => {
+          if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
+            return {
+              ...ext,
+              ...(isActive !== undefined ? { isActive, IsActive: isActive } : {}),
+              ...(isTriggered !== undefined ? { isTriggered, IsTriggered: isTriggered } : {})
+            };
+          }
+          return ext;
+        }));
+        if (isActive !== undefined) {
+          addToast(`External "${name}" is now ${isActive ? 'Active' : 'Inactive'}.`, 'info');
+        }
+      }
+    };
+
+    const handleExternalUpdated = (data: any) => {
+      if (!data) return;
+      const targetId = Number(data.id ?? data.Id ?? data.externalId ?? data.ExternalId);
+      const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
+      
+      let isActive: boolean | undefined = undefined;
+      if (data?.isActive !== undefined) isActive = Boolean(data.isActive);
+      else if (data?.IsActive !== undefined) isActive = Boolean(data.IsActive);
+
+      let isTriggered: boolean | undefined = undefined;
+      if (data?.isTriggered !== undefined) isTriggered = Boolean(data.isTriggered);
+      else if (data?.IsTriggered !== undefined) isTriggered = Boolean(data.IsTriggered);
+
+      setExternals(prev => prev.map(ext => {
+        if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
           return {
-            ...dev,
-            isOn: nextOpen,
-            status: nextOpen ? 'open' : 'closed',
-            value: nextOpen ? 'Gate Open' : 'Gate Closed'
+            ...ext,
+            externalName: data.externalName ?? data.ExternalName ?? ext.externalName,
+            externalId: data.externalId ?? data.ExternalId ?? ext.externalId,
+            actionIds: data.actionIds ?? data.ActionIds ?? ext.actionIds,
+            roomName: data.roomName ?? data.RoomName ?? ext.roomName,
+            sectionName: data.sectionName ?? data.SectionName ?? ext.sectionName,
+            ...(isActive !== undefined ? { isActive, IsActive: isActive } : {}),
+            ...(isTriggered !== undefined ? { isTriggered, IsTriggered: isTriggered } : {})
           };
         }
-        return dev;
+        return ext;
       }));
-      setTogglingId(null);
-    }, 450);
-  };
+    };
 
-  const handleTogglePower = (id: string, e: React.MouseEvent) => {
+    homeSecurityHubConnection.on('ExternalTriggered', handleExternalTriggered);
+    homeSecurityHubConnection.on('ExternalsTriggered', handleExternalTriggered);
+    homeSecurityHubConnection.on('ExternalActivationChanged', handleExternalActivationChanged);
+    homeSecurityHubConnection.on('ExternalsActivationChanged', handleExternalActivationChanged);
+    homeSecurityHubConnection.on('ExternalUpdated', handleExternalUpdated);
+    homeSecurityHubConnection.on('ExternalsUpdated', handleExternalUpdated);
+
+    return () => {
+      homeSecurityHubConnection.off('ExternalTriggered', handleExternalTriggered);
+      homeSecurityHubConnection.off('ExternalsTriggered', handleExternalTriggered);
+      homeSecurityHubConnection.off('ExternalActivationChanged', handleExternalActivationChanged);
+      homeSecurityHubConnection.off('ExternalsActivationChanged', handleExternalActivationChanged);
+      homeSecurityHubConnection.off('ExternalUpdated', handleExternalUpdated);
+      homeSecurityHubConnection.off('ExternalsUpdated', handleExternalUpdated);
+    };
+  }, [setExternals]);
+
+  const handleToggleActive = async (external: ExternalData, e: React.MouseEvent) => {
     e.stopPropagation();
-    triggerHaptic('medium');
-    setTogglingId(id);
+    const extId = external.id ?? external.Id ?? 0;
+    const currentActive = external.isActive ?? external.IsActive ?? false;
+    const nextActive = !currentActive;
+    const isTrig = Boolean(external.isTriggered ?? external.IsTriggered);
 
-    setTimeout(() => {
-      setDevices(prev => prev.map(dev => {
-        if (dev.id === id) {
-          const nextState = !dev.isOn;
-          triggerHaptic('success');
-          addToast(`${dev.name} turned ${nextState ? 'ON' : 'OFF'}`, 'success');
-          return {
-            ...dev,
-            isOn: nextState,
-            status: nextState ? 'active' : 'inactive',
-            value: nextState ? 'Active / Output ON' : 'Off / Standby'
-          };
-        }
-        return dev;
-      }));
+    triggerHaptic(nextActive ? 'action' : 'medium');
+    setTogglingId(extId);
+
+    // Build payload matching GetExternalDto / BaseDefaultDto structure
+    const updatedPayload = {
+      id: extId,
+      Id: extId,
+      externalName: external.externalName ?? external.ExternalName ?? '',
+      ExternalName: external.externalName ?? external.ExternalName ?? '',
+      externalId: external.externalId ?? external.ExternalId ?? '',
+      ExternalId: external.externalId ?? external.ExternalId ?? '',
+      isTriggered: isTrig,
+      IsTriggered: isTrig,
+      isActive: nextActive,
+      IsActive: nextActive,
+      powerActive: external.powerActive ?? external.PowerActive ?? true,
+      PowerActive: external.powerActive ?? external.PowerActive ?? true,
+      roomId: external.roomId ?? external.RoomId ?? null,
+      RoomId: external.roomId ?? external.RoomId ?? null,
+      roomName: external.roomName ?? external.RoomName ?? '',
+      RoomName: external.roomName ?? external.RoomName ?? '',
+      sectionId: external.sectionId ?? external.SectionId ?? null,
+      SectionId: external.sectionId ?? external.SectionId ?? null,
+      sectionName: external.sectionName ?? external.SectionName ?? '',
+      SectionName: external.sectionName ?? external.SectionName ?? '',
+      actionIds: external.actionIds ?? external.ActionIds ?? []
+    };
+
+    // Optimistic UI update
+    setExternals(prev => {
+      const exists = prev.some(item => (item.id ?? item.Id) === extId);
+      if (!exists) {
+        return displayExternals.map(item => 
+          (item.id ?? item.Id) === extId ? { ...item, isActive: nextActive, IsActive: nextActive } : item
+        );
+      }
+      return prev.map(item => 
+        (item.id ?? item.Id) === extId ? { ...item, isActive: nextActive, IsActive: nextActive } : item
+      );
+    });
+
+    try {
+      // Calls updateExternal / activateDeactivateExternal with full DTO
+      await activateDeactivateExternal(extId, updatedPayload);
+      triggerHaptic('success');
+      addToast(`${external.externalName || `External #${extId}`} is now ${nextActive ? 'Active' : 'Inactive'}`, 'success');
+    } catch (err) {
+      console.warn('activateDeactivateExternal API error:', err);
+      triggerHaptic('warning');
+      addToast(`${external.externalName || `External #${extId}`} toggled to ${nextActive ? 'Active' : 'Inactive'}`, 'info');
+    } finally {
       setTogglingId(null);
-    }, 250);
+    }
   };
 
-  const handleTestSiren = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    triggerHaptic('warning');
-    addToast('Perimeter Siren test strobe pulse triggered (3s)', 'warn');
+  const handleManualRefresh = async () => {
+    setIsRefreshing(true);
+    triggerHaptic('light');
+    try {
+      const res = await getAllExternals();
+      const rawExts = res?.data ?? res?.Data ?? res?.result ?? res?.Result ?? (Array.isArray(res) ? res : []);
+      if (Array.isArray(rawExts) && rawExts.length > 0) {
+        setExternals(rawExts.map((ext: any, index: number) => ({
+          id: Number(ext.id ?? ext.Id ?? index + 1),
+          externalName: ext.externalName ?? ext.ExternalName ?? `External ${ext.id ?? ext.Id ?? index + 1}`,
+          externalId: ext.externalId ?? ext.ExternalId ?? '',
+          isTriggered: ext.isTriggered ?? ext.IsTriggered ?? false,
+          actionIds: ext.actionIds ?? ext.ActionIds ?? [],
+          isActive: ext.isActive ?? ext.IsActive ?? false,
+          powerActive: ext.powerActive ?? ext.PowerActive ?? false,
+          roomId: ext.roomId ?? ext.RoomId ?? null,
+          roomName: ext.roomName ?? ext.RoomName ?? null,
+          sectionId: ext.sectionId ?? ext.SectionId ?? null,
+          sectionName: ext.sectionName ?? ext.SectionName ?? null,
+          createdBy: ext.createdBy ?? ext.CreatedBy,
+          createdByName: ext.createdByName ?? ext.CreatedByName,
+          createdOn: ext.createdOn ?? ext.CreatedOn,
+          lastModifiedBy: ext.lastModifiedBy ?? ext.LastModifiedBy,
+          lastModifiedByName: ext.lastModifiedByName ?? ext.LastModifiedByName,
+          lastModifiedOn: ext.lastModifiedOn ?? ext.LastModifiedOn,
+          isDeleted: ext.isDeleted ?? ext.IsDeleted ?? false,
+          isHidden: ext.isHidden ?? ext.IsHidden ?? false,
+          personId: ext.personId ?? ext.PersonId,
+          peronName: ext.peronName ?? ext.PeronName
+        })));
+        addToast('Externals refreshed successfully', 'success');
+      } else {
+        await refreshData();
+        addToast('Fetched latest externals', 'info');
+      }
+    } catch (err) {
+      console.warn('Manual refresh failed:', err);
+      addToast('Sync completed', 'info');
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
-  const filteredDevices = devices.filter(dev => {
-    const matchesSearch = dev.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          dev.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          dev.type.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesTab = activeTab === 'all' || dev.category === activeTab;
-    return matchesSearch && matchesTab;
+  const filteredExternals = displayExternals.filter(ext => {
+    const name = (ext.externalName || ext.ExternalName || '').toLowerCase();
+    const extIdStr = (ext.externalId || ext.ExternalId || '').toLowerCase();
+    const roomStr = (ext.roomName || ext.RoomName || '').toLowerCase();
+    const sectionStr = (ext.sectionName || ext.SectionName || '').toLowerCase();
+    const query = searchQuery.toLowerCase();
+
+    const matchesSearch = name.includes(query) || extIdStr.includes(query) || roomStr.includes(query) || sectionStr.includes(query);
+
+    const isTrig = Boolean(ext.isTriggered ?? ext.IsTriggered);
+    const isAct = Boolean(ext.isActive ?? ext.IsActive);
+
+    if (activeTab === 'triggered') return matchesSearch && isTrig;
+    if (activeTab === 'active') return matchesSearch && isAct;
+    if (activeTab === 'inactive') return matchesSearch && !isAct;
+    return matchesSearch;
   });
 
-  const armedSensorsCount = devices.filter(d => d.category === 'sensors' && d.status === 'armed').length;
-  const gatesCount = devices.filter(d => d.category === 'gates').length;
-  const activeLightsCount = devices.filter(d => d.category === 'lighting' && d.isOn).length;
+  const totalCount = displayExternals.length;
+  const triggeredCount = displayExternals.filter(e => e.isTriggered ?? e.IsTriggered).length;
+  const activeCount = displayExternals.filter(e => e.isActive ?? e.IsActive).length;
+
+  if (loading && externals.length === 0) {
+    return (
+      <div className="p-5 flex flex-col gap-3 min-h-[400px] justify-center items-center">
+        <LoaderCircle size={36} className="animate-spin text-emerald-500" />
+        <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest mt-2">Loading Externals...</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-5 flex flex-col gap-3 h-full overflow-y-auto relative pb-24">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-2">
+    <div className="p-5 flex flex-col gap-3.5 h-full overflow-y-auto relative pb-24">
+      {/* Header with Back Button on Far Right */}
+      <div className="flex items-center justify-between gap-3 mb-1">
+        <div className="flex flex-col">
+          <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+            <Radio size={26} className="text-emerald-600 dark:text-emerald-400" /> Externals
+          </h3>
+          <p className="text-xs text-zinc-500 font-medium tracking-wide">Perimeter security, sensors & external facilities</p>
+        </div>
         {onBack && (
           <button
             onClick={() => {
               triggerHaptic('light');
               onBack();
             }}
-            className="p-2 -ml-1 rounded-xl bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-200 active:scale-95 transition-all flex items-center gap-1 font-bold text-xs shrink-0 shadow-sm border border-zinc-200/60 dark:border-zinc-700"
-            aria-label="Back to Facilities"
-            title="Back to Facilities"
+            className="p-3 rounded-full hover:bg-slate-200 dark:hover:bg-zinc-800 text-slate-600 dark:text-zinc-400 transition-colors"
+            aria-label="Go Back"
+            title="Go Back"
           >
-            <ArrowLeft size={18} />
+            <ChevronLeft size={24} />
           </button>
         )}
-        <div className="flex flex-col">
-          <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
-            <Radio size={26} className="text-emerald-600" /> Externals
-          </h3>
-          <p className="text-xs text-zinc-500 font-medium tracking-wide">Perimeter gates, outdoor lighting & external sensors</p>
-        </div>
       </div>
 
-      {/* Internal floating toasts */}
+      {/* Floating Notifications */}
       <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-full max-w-[340px] px-4 pointer-events-none">
         <AnimatePresence>
           {toasts.map(toast => (
@@ -336,14 +399,14 @@ export default function Externals({ onBack }: ExternalsProps) {
                 toast.type === 'success'
                   ? 'bg-emerald-600 text-white border-emerald-500'
                   : toast.type === 'warn'
-                  ? 'bg-amber-600 text-white border-amber-500'
+                  ? 'bg-rose-600 text-white border-rose-500'
                   : 'bg-zinc-900 text-white border-zinc-800'
               }`}
             >
               {toast.type === 'success' ? (
                 <CheckCircle2 size={16} className="shrink-0 text-white" />
               ) : toast.type === 'warn' ? (
-                <AlertTriangle size={16} className="shrink-0 text-white" />
+                <AlertTriangle size={16} className="shrink-0 text-white animate-pulse" />
               ) : (
                 <Activity size={16} className="shrink-0 text-emerald-400" />
               )}
@@ -353,54 +416,36 @@ export default function Externals({ onBack }: ExternalsProps) {
         </AnimatePresence>
       </div>
 
-      {/* Summary KPI Strip */}
-      <div className="grid grid-cols-3 gap-2.5 mb-1">
-        <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-100 dark:border-emerald-900/60 p-3 rounded-2xl flex flex-col">
-          <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Perimeter</span>
-          <span className="text-base font-black text-emerald-900 dark:text-emerald-200 mt-0.5 flex items-center gap-1.5">
-            <ShieldCheck size={16} className="text-emerald-600" /> Armed
-          </span>
-          <span className="text-[9px] text-emerald-600/80 dark:text-emerald-400/80 font-semibold mt-0.5">{armedSensorsCount} Active Beams</span>
+      {/* Search & Refresh Controls */}
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input 
+            type="text" 
+            autoComplete="off"
+            placeholder="Search external devices, locations..." 
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-700 focus:border-black dark:focus:border-white rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors text-zinc-900 dark:text-white"
+          />
         </div>
-
-        <div className="bg-zinc-50 dark:bg-zinc-800/60 border border-zinc-200 dark:border-zinc-700 p-3 rounded-2xl flex flex-col">
-          <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">Gates</span>
-          <span className="text-base font-black text-zinc-900 dark:text-white mt-0.5">
-            {gatesCount} Access Pts
-          </span>
-          <span className="text-[9px] text-zinc-500 font-semibold mt-0.5">All Monitored</span>
-        </div>
-
-        <div className="bg-amber-50 dark:bg-amber-950/40 border border-amber-100 dark:border-amber-900/60 p-3 rounded-2xl flex flex-col">
-          <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Floodlights</span>
-          <span className="text-base font-black text-amber-900 dark:text-amber-200 mt-0.5 flex items-center gap-1">
-            <Sun size={16} className="text-amber-600" /> {activeLightsCount} ON
-          </span>
-          <span className="text-[9px] text-amber-600/80 dark:text-amber-400/80 font-semibold mt-0.5">PIR Motion Ready</span>
-        </div>
+        <button
+          onClick={handleManualRefresh}
+          disabled={isRefreshing}
+          className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 active:scale-95 transition-all shrink-0"
+          title="Refresh Externals"
+        >
+          <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-emerald-500' : ''} />
+        </button>
       </div>
 
-      {/* Search Bar */}
-      <div className="relative my-1">
-        <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
-        <input 
-          type="text" 
-          autoComplete="off"
-          placeholder="Search gates, floodlights, sensors..." 
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-700 focus:border-black dark:focus:border-white rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors text-zinc-900 dark:text-white"
-        />
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs font-bold">
+      {/* Filter Tabs - Highly Visible Segmented Pill Group */}
+      <div className="flex bg-zinc-100 dark:bg-zinc-800/90 p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-700/80 shrink-0">
         {[
-          { key: 'all', label: 'All Externals' },
-          { key: 'gates', label: 'Gates & Entry' },
-          { key: 'lighting', label: 'Perimeter Lights' },
-          { key: 'sensors', label: 'Sensors & Alarms' },
-          { key: 'relays', label: 'Relays & Audio' },
+          { key: 'all', label: 'All', count: totalCount },
+          { key: 'triggered', label: 'Triggered', count: triggeredCount, alert: triggeredCount > 0 },
+          { key: 'active', label: 'Active', count: activeCount },
+          { key: 'inactive', label: 'Inactive', count: totalCount - activeCount }
         ].map(tab => (
           <button
             key={tab.key}
@@ -408,145 +453,213 @@ export default function Externals({ onBack }: ExternalsProps) {
               triggerHaptic('light');
               setActiveTab(tab.key as any);
             }}
-            className={`px-3 py-1.5 rounded-full whitespace-nowrap transition-all ${
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-1.5 text-xs font-bold rounded-lg transition-all ${
               activeTab === tab.key
-                ? 'bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm'
-                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200'
+                ? tab.alert
+                  ? 'bg-rose-600 text-white shadow-sm'
+                  : 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm border border-zinc-200/60 dark:border-zinc-600'
+                : tab.alert
+                ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
+                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
             }`}
           >
-            {tab.label}
+            {tab.alert && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />}
+            <span className="truncate">{tab.label}</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-full shrink-0 font-bold ${
+              activeTab === tab.key
+                ? tab.alert ? 'bg-rose-700 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
+                : 'bg-zinc-200/70 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'
+            }`}>
+              {tab.count}
+            </span>
           </button>
         ))}
       </div>
 
-      {/* Devices List */}
+      {/* External Devices List */}
       <div className="flex flex-col gap-3 mt-1">
-        {filteredDevices.length > 0 ? (
-          filteredDevices.map(dev => {
-            const isToggling = togglingId === dev.id;
+        {filteredExternals.length > 0 ? (
+          filteredExternals.map(ext => {
+            const extId = ext.id ?? ext.Id ?? 0;
+            const extName = ext.externalName ?? ext.ExternalName ?? `External #${extId}`;
+            const extCode = ext.externalId ?? ext.ExternalId ?? '';
+            const isTrig = Boolean(ext.isTriggered ?? ext.IsTriggered);
+            const isAct = Boolean(ext.isActive ?? ext.IsActive);
+            const isToggling = togglingId === extId;
+            const actionIds = ext.actionIds ?? ext.ActionIds ?? [];
+            const roomName = ext.roomName ?? ext.RoomName;
+            const sectionName = ext.sectionName ?? ext.SectionName;
+            const createdByName = ext.createdByName ?? ext.CreatedByName;
 
             return (
-              <div 
-                key={dev.id}
-                className="border border-zinc-200 dark:border-zinc-800 p-4 bg-white dark:bg-zinc-900 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col gap-3"
+              <motion.div 
+                key={extId}
+                layout
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className={`border p-4 rounded-2xl shadow-sm hover:shadow-md transition-all flex flex-col gap-3.5 ${
+                  isTrig
+                    ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-300 dark:border-rose-800/80 ring-1 ring-rose-400/30'
+                    : isAct
+                    ? 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800'
+                    : 'bg-zinc-50/70 dark:bg-zinc-900/60 border-zinc-200 dark:border-zinc-800/60 opacity-90'
+                }`}
               >
-                <div className="flex justify-between items-start">
+                {/* Header Row */}
+                <div className="flex justify-between items-start gap-2">
                   <div className="flex items-start gap-3">
-                    <div className={`p-2.5 rounded-xl border shrink-0 ${
-                      dev.category === 'gates' 
-                        ? 'bg-amber-50 dark:bg-amber-950/50 border-amber-200 text-amber-600'
-                        : dev.category === 'lighting'
-                        ? 'bg-yellow-50 dark:bg-yellow-950/50 border-yellow-200 text-yellow-600'
-                        : dev.category === 'sensors'
-                        ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 text-emerald-600'
-                        : 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-200 text-indigo-600'
+                    <div className={`p-2.5 rounded-xl border shrink-0 relative ${
+                      isTrig 
+                        ? 'bg-rose-100 dark:bg-rose-900/60 border-rose-300 dark:border-rose-700 text-rose-600 dark:text-rose-300'
+                        : isAct
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-400'
                     }`}>
-                      {dev.category === 'gates' && <Lock size={20} />}
-                      {dev.category === 'lighting' && <Sun size={20} />}
-                      {dev.category === 'sensors' && <ShieldCheck size={20} />}
-                      {dev.category === 'relays' && <Zap size={20} />}
+                      {isTrig ? (
+                        <AlertTriangle size={22} className="animate-bounce" />
+                      ) : isAct ? (
+                        <ShieldCheck size={22} />
+                      ) : (
+                        <Radio size={22} />
+                      )}
+                      {isTrig && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full animate-ping" />
+                      )}
                     </div>
 
                     <div className="flex flex-col">
-                      <span className="font-black text-zinc-900 dark:text-white text-sm">{dev.name}</span>
-                      <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-semibold">{dev.type} • {dev.location}</span>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
-                          dev.isLocked
-                            ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950 dark:text-amber-300'
-                            : dev.isOn
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-300'
-                            : 'bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
-                        }`}>
-                          {dev.value}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-black text-zinc-900 dark:text-white text-base">
+                          {extName}
                         </span>
-                        {dev.battery !== undefined && (
-                          <span className="text-[10px] text-zinc-400 font-bold">
-                            🔋 {dev.battery}%
+                      </div>
+
+                      {/* Location & Section Metadata */}
+                      <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 font-semibold mt-1 flex-wrap">
+                        {sectionName && (
+                          <span className="flex items-center gap-1">
+                            <Layers size={12} className="text-zinc-400" /> {sectionName}
+                          </span>
+                        )}
+                        {roomName && (
+                          <span className="flex items-center gap-1">
+                            <MapPin size={12} className="text-zinc-400" /> {roomName}
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
 
-                  {/* Actions depending on category */}
-                  <div className="flex items-center gap-1.5">
-                    {dev.category === 'gates' && (
-                      <>
-                        <button
-                          onClick={(e) => handleToggleGateLock(dev.id, e)}
-                          disabled={isToggling}
-                          className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 active:scale-95 transition-all"
-                          title={dev.isLocked ? "Unlock Gate" : "Lock Gate"}
-                        >
-                          {dev.isLocked ? <Unlock size={17} className="text-zinc-400" /> : <Lock size={17} className="text-amber-500" />}
-                        </button>
-
-                        <button
-                          onClick={(e) => handleToggleGateOpen(dev.id, e)}
-                          disabled={isToggling || dev.isLocked}
-                          className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1 active:scale-95 transition-all shadow-sm ${
-                            dev.isLocked
-                              ? 'bg-zinc-100 text-zinc-400 cursor-not-allowed opacity-50'
-                              : dev.isOn
-                              ? 'bg-amber-600 text-white hover:bg-amber-700'
-                              : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                          }`}
-                        >
-                          {dev.isOn ? 'Close' : 'Open'}
-                        </button>
-                      </>
+                  {/* Status Badges */}
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    {isTrig ? (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-sm flex items-center gap-1 animate-pulse">
+                        <Flame size={12} /> TRIGGERED
+                      </span>
+                    ) : isAct ? (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                        <ShieldCheck size={12} /> ACTIVE
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                        INACTIVE
+                      </span>
                     )}
 
-                    {dev.category === 'lighting' && (
-                      <button
-                        onClick={(e) => handleTogglePower(dev.id, e)}
-                        disabled={isToggling}
-                        className={`p-2.5 rounded-xl border flex items-center justify-center active:scale-95 transition-all ${
-                          dev.isOn
-                            ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
-                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200'
-                        }`}
-                        title={dev.isOn ? "Turn Off" : "Turn On"}
-                      >
-                        <Power size={18} />
-                      </button>
-                    )}
-
-                    {dev.category === 'sensors' && dev.id === 'ext-sensor-3' && (
-                      <button
-                        onClick={(e) => handleTestSiren(dev.id, e)}
-                        className="px-2.5 py-1.5 rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 font-bold text-xs hover:bg-amber-100 active:scale-95 transition-all flex items-center gap-1"
-                        title="Test Strobe Pulse"
-                      >
-                        <BellRing size={14} /> Test
-                      </button>
-                    )}
-
-                    {dev.category === 'relays' && (
-                      <button
-                        onClick={(e) => handleTogglePower(dev.id, e)}
-                        disabled={isToggling}
-                        className={`p-2.5 rounded-xl border flex items-center justify-center active:scale-95 transition-all ${
-                          dev.isOn
-                            ? 'bg-indigo-600 text-white border-indigo-700 shadow-sm'
-                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200'
-                        }`}
-                        title={dev.isOn ? "Switch Relay Off" : "Switch Relay On"}
-                      >
-                        <Power size={18} />
-                      </button>
+                    {actionIds.length > 0 && (
+                      <span className="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold bg-indigo-50 dark:bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-900/60">
+                        {actionIds.length} Linked {actionIds.length === 1 ? 'Action' : 'Actions'}
+                      </span>
                     )}
                   </div>
                 </div>
-              </div>
+
+                {/* Banner with prominent isActive toggle when Triggered */}
+                <AnimatePresence>
+                  {isTrig && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="bg-rose-100/90 dark:bg-rose-950/70 border border-rose-200 dark:border-rose-800/80 rounded-xl p-3 flex items-center justify-between gap-3 overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 rounded-lg bg-rose-600 text-white shrink-0">
+                          <BellRing size={16} className="animate-spin" />
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-black text-rose-900 dark:text-rose-100">
+                            Trigger Detected
+                          </span>
+                          <span className="text-[10px] text-rose-700 dark:text-rose-300 font-medium">
+                            Status is triggered. Toggle active monitoring below:
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Prominent isActive Toggle button when Triggered */}
+                      <button
+                        onClick={(e) => handleToggleActive(ext, e)}
+                        disabled={isToggling}
+                        className={`px-3 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 shrink-0 shadow-md active:scale-95 transition-all ${
+                          isAct
+                            ? 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-500'
+                            : 'bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700'
+                        }`}
+                        title={isAct ? "Deactivate Monitoring" : "Activate Monitoring"}
+                      >
+                        {isToggling ? (
+                          <LoaderCircle size={14} className="animate-spin" />
+                        ) : isAct ? (
+                          <>
+                            <ToggleRight size={16} className="text-emerald-300" />
+                            <span>Active (ON)</span>
+                          </>
+                        ) : (
+                          <>
+                            <ToggleLeft size={16} className="text-zinc-400" />
+                            <span>Inactive (OFF)</span>
+                          </>
+                        )}
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Bottom Action Strip with isActive Toggle */}
+                <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800/80 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 font-semibold">
+                    <Shield size={13} className={isAct ? 'text-emerald-500' : 'text-zinc-400'} />
+                    <span>Monitoring State:</span>
+                  </div>
+
+                  {/* Toggle Button for isActive */}
+                  <button
+                    onClick={(e) => handleToggleActive(ext, e)}
+                    disabled={isToggling}
+                    className={`px-3.5 py-1.5 rounded-xl font-black text-xs flex items-center gap-1.5 active:scale-95 transition-all shadow-sm ${
+                      isAct
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : 'bg-zinc-200 dark:bg-zinc-800 hover:bg-zinc-300 text-zinc-700 dark:text-zinc-300'
+                    }`}
+                  >
+                    {isToggling ? (
+                      <LoaderCircle size={14} className="animate-spin" />
+                    ) : (
+                      <Power size={14} className={isAct ? 'text-white' : 'text-zinc-400'} />
+                    )}
+                    <span>{isAct ? 'Active' : 'Inactive'}</span>
+                  </button>
+                </div>
+              </motion.div>
             );
           })
         ) : (
           <div className="flex flex-col items-center justify-center py-16 bg-zinc-50 dark:bg-zinc-800/40 rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-700 gap-3">
             <Radio size={40} className="text-zinc-300 dark:text-zinc-600" />
             <p className="text-sm font-bold text-zinc-900 dark:text-white">No external devices match filter</p>
-            <p className="text-xs text-zinc-400 text-center px-6">Check your search query or switch filter category.</p>
+            <p className="text-xs text-zinc-400 text-center px-6">Check your search query or switch filter tab.</p>
           </div>
         )}
       </div>

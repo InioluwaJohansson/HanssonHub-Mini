@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Camera, ShieldCheck, ShieldAlert, FileText, LayoutDashboard, DoorClosed, Play, Pause, LoaderCircle, ChevronRight } from 'lucide-react';
 import { useLogs } from '../context/LogsContext';
-import { useData } from '../context/DataContext';
+import { useData, parseActionSignalRPayload } from '../context/DataContext';
 import { motion } from 'motion/react';
-import { getImageUrl, activateDeactivateAction } from '../utils/api';
+import { getImageUrl, activateDeactivateAction, getAllActions } from '../utils/api';
 import { formatRelativeTime } from '../utils/dateUtils';
 import { triggerHaptic } from '../utils/haptics';
 import { ViewType } from '../components/BottomNav';
@@ -29,16 +29,34 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     triggerHaptic('medium');
     setTogglingActionId(actionId);
     try {
-      await activateDeactivateAction(actionId);
-      triggerHaptic('success');
-      setActions(prev => prev.map(act => {
-        const id = act.id ?? act.Id;
-        if (id === actionId) {
-          const current = act.actionActive ?? act.ActionActive ?? false;
-          return { ...act, actionActive: !current, ActionActive: !current };
+      // 1. Dispatch toggle request to the backend. Do NOT blindly invert local state.
+      const response = await activateDeactivateAction(actionId);
+      
+      // 2. Parse response from server if it returned the authoritative boolean state
+      const parsed = parseActionSignalRPayload(response);
+      if (parsed.actionId === actionId && parsed.isActive !== undefined) {
+        setActions(prev => prev.map(act => {
+          const id = Number(act.id ?? act.Id);
+          if (id === actionId) {
+            return {
+              ...act,
+              actionActive: parsed.isActive!,
+              ActionActive: parsed.isActive!,
+              isActive: parsed.isActive!,
+              IsActive: parsed.isActive!
+            };
+          }
+          return act;
+        }));
+      } else {
+        // Synchronize with database to ensure frontend state matches backend reality exactly
+        const refreshed = await getAllActions();
+        const dataArray = refreshed?.data ?? refreshed?.Data ?? refreshed?.result ?? refreshed?.Result ?? (Array.isArray(refreshed) ? refreshed : []);
+        if (Array.isArray(dataArray) && dataArray.length > 0) {
+          setActions(dataArray);
         }
-        return act;
-      }));
+      }
+      triggerHaptic('success');
     } catch (err) {
       triggerHaptic('warning');
       console.error("Failed to toggle action from dashboard", err);
@@ -180,7 +198,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           {actions.slice(0, 2).map((action, idx) => {
             const actId = action.id ?? action.Id;
             const name = action.actionName ?? action.ActionName ?? `Action #${actId}`;
-            const isActive = action.actionActive ?? action.ActionActive ?? false;
+            const isActive = action.actionActive ?? action.ActionActive ?? action.isActive ?? action.IsActive ?? false;
             const isToggling = togglingActionId === actId;
             
             return (
