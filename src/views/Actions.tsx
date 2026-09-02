@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle, ChevronLeft } from 'lucide-react';
+import { Play, Search, Activity, Trash2, Edit, Plus, CheckCircle, AlertCircle, Sparkles, HelpCircle, LoaderCircle, ChevronLeft, Filter, ArrowUpDown, ChevronDown } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { getAllActions, activateDeactivateAction } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 import { triggerHaptic } from '../utils/haptics';
+import { triggerAppNotification } from '../utils/notifications';
 
 import { useData, ActionData, parseActionSignalRPayload } from '../context/DataContext';
 
@@ -15,7 +16,8 @@ interface ActionsProps {
 export default function Actions({ onBack }: ActionsProps) {
   const { actions, setActions, loading, refreshData } = useData();
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'name_asc' | 'name_desc' | 'status'>('default');
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [expandedActionId, setExpandedActionId] = useState<number | null>(null);
   const [triggeredActions, setTriggeredActions] = useState<{ [id: number]: boolean }>({});
@@ -55,6 +57,13 @@ export default function Actions({ onBack }: ActionsProps) {
       }
 
       triggerHaptic('action');
+      triggerAppNotification({
+        title: name,
+        message: 'Security action routine initiated',
+        type: 'action',
+        status: 'triggered',
+        badge: 'Action'
+      });
       addToast(`Action "${name}" triggered!`, 'success');
       
       // Visual highlight effect
@@ -123,6 +132,13 @@ export default function Actions({ onBack }: ActionsProps) {
           return act;
         }));
         const name = parsed.actionName ?? `Action #${actId}`;
+        triggerAppNotification({
+          title: name,
+          message: parsed.isActive ? 'Security action enabled' : 'Security action disabled',
+          type: 'action',
+          status: parsed.isActive ? 'active' : 'inactive',
+          badge: 'Action'
+        });
         addToast(`Action "${name}" is now ${parsed.isActive ? 'Active' : 'Inactive'}.`, 'info');
       }
     };
@@ -158,6 +174,9 @@ export default function Actions({ onBack }: ActionsProps) {
     const actionId = Number(action.id ?? action.Id);
     if (!actionId || isNaN(actionId) || togglingId !== null) return;
 
+    const actionName = action.actionName ?? action.ActionName ?? `Action #${actionId}`;
+    const currentlyActive = action.actionActive ?? action.ActionActive ?? false;
+
     triggerHaptic('medium');
     setTogglingId(actionId);
     try {
@@ -166,6 +185,16 @@ export default function Actions({ onBack }: ActionsProps) {
       
       // 2. Parse response from server if it returned the authoritative boolean state
       const parsed = parseActionSignalRPayload(response);
+      const nextActiveState = parsed.isActive !== undefined ? parsed.isActive : !currentlyActive;
+
+      triggerAppNotification({
+        title: actionName,
+        message: nextActiveState ? 'Security action routine enabled' : 'Security action routine disabled',
+        type: 'action',
+        status: nextActiveState ? 'active' : 'inactive',
+        badge: 'Action'
+      });
+
       if (parsed.actionId === actionId && parsed.isActive !== undefined) {
         setActions(prev => prev.map(act => {
           const currId = Number(act.id ?? act.Id);
@@ -198,21 +227,37 @@ export default function Actions({ onBack }: ActionsProps) {
     }
   };
 
-  const filteredActions = actions.filter(act => {
-    const name = (act.actionName ?? act.ActionName ?? '').toLowerCase();
-    const desc = (act.actionDescription ?? act.ActionDescription ?? '').toLowerCase();
-    const matchesSearch = name.includes(searchQuery.toLowerCase()) || desc.includes(searchQuery.toLowerCase());
-    
-    const isActive = act.actionActive ?? act.ActionActive ?? false;
-    if (filter === 'active') return matchesSearch && isActive;
-    if (filter === 'inactive') return matchesSearch && !isActive;
-    return matchesSearch;
-  });
+  const totalCount = actions.length;
+  const activeCount = actions.filter(a => Boolean(a.actionActive ?? a.ActionActive)).length;
+
+  const filteredAndSortedActions = actions
+    .filter(act => {
+      const name = (act.actionName ?? act.ActionName ?? '').toLowerCase();
+      const desc = (act.actionDescription ?? act.ActionDescription ?? '').toLowerCase();
+      const matchesSearch = name.includes(searchQuery.toLowerCase()) || desc.includes(searchQuery.toLowerCase());
+      
+      const isActive = Boolean(act.actionActive ?? act.ActionActive ?? false);
+      if (filterStatus === 'active') return matchesSearch && isActive;
+      if (filterStatus === 'inactive') return matchesSearch && !isActive;
+      return matchesSearch;
+    })
+    .sort((a, b) => {
+      const nameA = (a.actionName ?? a.ActionName ?? '').toLowerCase();
+      const nameB = (b.actionName ?? b.ActionName ?? '').toLowerCase();
+      if (sortBy === 'name_asc') return nameA.localeCompare(nameB);
+      if (sortBy === 'name_desc') return nameB.localeCompare(nameA);
+      if (sortBy === 'status') {
+        const aActive = (a.actionActive ?? a.ActionActive ?? false) ? 1 : 0;
+        const bActive = (b.actionActive ?? b.ActionActive ?? false) ? 1 : 0;
+        return bActive - aActive;
+      }
+      return 0;
+    });
 
   return (
     <div className="p-5 flex flex-col gap-3 h-full overflow-y-auto relative pb-24">
       {/* View Header */}
-      <div className="flex items-center justify-between gap-3 mb-2">
+      <div className="flex items-center justify-between gap-3 mb-1">
         <div className="flex flex-col">
           <h3 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
             <Play size={26} className="text-indigo-600" /> Actions
@@ -264,35 +309,64 @@ export default function Actions({ onBack }: ActionsProps) {
         </AnimatePresence>
       </div>
 
-      {/* Search and Filters */}
-      <div className="flex flex-col gap-3 mb-2 shrink-0">
+      {/* Search & Styled Sort/Filter Dropdowns */}
+      <div className="flex flex-col gap-2.5 mb-1 shrink-0">
         <div className="relative">
           <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
           <input 
             type="text" 
             autoComplete="off"
-            placeholder="Search actions by name or steps..." 
+            placeholder="Search actions by name or description..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-transparent border-b-2 border-zinc-200 focus:border-black rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors"
+            className="w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-700 focus:border-indigo-600 dark:focus:border-indigo-400 rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors text-zinc-900 dark:text-white"
           />
         </div>
 
-        {/* Tab Filters */}
-        <div className="flex bg-zinc-100 p-1 rounded-xl border border-zinc-200">
-          {(['all', 'active', 'inactive'] as const).map(tab => (
-            <button
-              key={tab}
-              onClick={() => setFilter(tab)}
-              className={`flex-1 text-center py-1.5 text-xs font-bold capitalize rounded-lg transition-all ${
-                filter === tab 
-                  ? 'bg-white text-zinc-900 shadow-sm border border-zinc-200/50' 
-                  : 'text-zinc-500 hover:text-zinc-700'
-              }`}
-            >
-              {tab}
-            </button>
-          ))}
+        {/* Dropdown Filters (No segmented tab display) */}
+        <div className="flex items-center gap-2">
+          {/* Status Filter Dropdown */}
+          <div className="relative flex-1">
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100/90 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-200 transition-colors">
+              <Filter size={14} className="text-zinc-400 shrink-0" />
+              <select
+                aria-label="Filter Actions by Status"
+                value={filterStatus}
+                onChange={(e) => {
+                  triggerHaptic('selection');
+                  setFilterStatus(e.target.value as any);
+                }}
+                className="w-full bg-transparent text-xs font-bold text-zinc-800 dark:text-zinc-100 focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                <option value="all" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">All Actions ({totalCount})</option>
+                <option value="active" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Active Only ({activeCount})</option>
+                <option value="inactive" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Disabled Only ({totalCount - activeCount})</option>
+              </select>
+              <ChevronDown size={14} className="text-zinc-400 pointer-events-none absolute right-2.5" />
+            </div>
+          </div>
+
+          {/* Sort Order Dropdown */}
+          <div className="relative flex-1">
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100/90 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-200 transition-colors">
+              <ArrowUpDown size={14} className="text-zinc-400 shrink-0" />
+              <select
+                aria-label="Sort Actions Order"
+                value={sortBy}
+                onChange={(e) => {
+                  triggerHaptic('selection');
+                  setSortBy(e.target.value as any);
+                }}
+                className="w-full bg-transparent text-xs font-bold text-zinc-800 dark:text-zinc-100 focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                <option value="default" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Default Sort</option>
+                <option value="name_asc" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Name (A – Z)</option>
+                <option value="name_desc" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Name (Z – A)</option>
+                <option value="status" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Active First</option>
+              </select>
+              <ChevronDown size={14} className="text-zinc-400 pointer-events-none absolute right-2.5" />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -303,27 +377,25 @@ export default function Actions({ onBack }: ActionsProps) {
             <LoaderCircle size={36} className="animate-spin text-indigo-600" />
             <p className="text-xs font-bold text-zinc-500 uppercase tracking-widest">Loading security macros...</p>
           </div>
-        ) : filteredActions.length > 0 ? (
+        ) : filteredAndSortedActions.length > 0 ? (
           <div className="flex flex-col gap-3.5">
-            {filteredActions.map(action => {
+            {filteredAndSortedActions.map(action => {
               const actId = action.id ?? action.Id ?? 0;
               const name = action.actionName ?? action.ActionName ?? `Action #${actId}`;
               const desc = action.actionDescription ?? action.ActionDescription ?? 'No description provided.';
               const isActive = action.actionActive ?? action.ActionActive ?? false;
-              const steps = action.getActionStepDtos ?? action.GetActionStepDtos ?? [];
               const isToggling = togglingId === actId;
-              const isExpanded = expandedActionId === actId;
               const isRecentlyTriggered = !!triggeredActions[actId];
 
               return (
                 <div 
                   key={actId} 
-                  className={`border flex flex-col bg-white rounded-2xl shadow-sm hover:shadow-md transition-all relative overflow-hidden ${
+                  className={`border flex flex-col bg-white dark:bg-zinc-900 rounded-2xl shadow-sm hover:shadow-md transition-all relative overflow-hidden ${
                     isRecentlyTriggered 
                       ? 'border-indigo-500 ring-2 ring-indigo-500/20' 
                       : isActive 
-                      ? 'border-indigo-100' 
-                      : 'border-zinc-200'
+                      ? 'border-indigo-100 dark:border-indigo-900/40' 
+                      : 'border-zinc-200 dark:border-zinc-800'
                   }`}
                 >
                   <div 
@@ -332,15 +404,15 @@ export default function Actions({ onBack }: ActionsProps) {
                     <div className="flex justify-between items-start gap-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <Play size={18} className={`${isActive ? 'text-indigo-600' : 'text-zinc-400'} shrink-0`} />
-                          <p className="font-black text-zinc-900 text-base truncate">{name}</p>
+                          <Play size={18} className={`${isActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} shrink-0`} />
+                          <p className="font-black text-zinc-900 dark:text-white text-base truncate">{name}</p>
                           {isRecentlyTriggered && (
-                            <span className="bg-indigo-100 text-indigo-700 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md animate-pulse shrink-0">
+                            <span className="bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300 text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md animate-pulse shrink-0">
                               Triggered!
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-zinc-500 mt-0.5 line-clamp-2">{desc}</p>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5 line-clamp-2">{desc}</p>
                       </div>
 
                       <div className="flex items-center gap-2 shrink-0">
@@ -348,10 +420,11 @@ export default function Actions({ onBack }: ActionsProps) {
                         <button 
                           onClick={(e) => handleToggleActive(action, e)}
                           disabled={isToggling}
+                          aria-label={`Toggle ${name}`}
                           className={`w-14 h-7 rounded-full transition-colors relative focus:outline-none shrink-0 ${
                             isToggling ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'
                           } ${
-                            isActive ? 'bg-indigo-600' : 'bg-zinc-300'
+                            isActive ? 'bg-indigo-600' : 'bg-zinc-300 dark:bg-zinc-700'
                           }`}
                         >
                           {isToggling ? (
@@ -369,9 +442,9 @@ export default function Actions({ onBack }: ActionsProps) {
                       </div>
                     </div>
 
-                    {/* Metadata summary (active step badge only) */}
+                    {/* Metadata summary */}
                     <div className="flex items-center justify-end mt-1 text-[10px] text-zinc-400 font-bold uppercase tracking-wider">
-                      <span className={`px-2 py-0.5 rounded-full font-black ${isActive ? 'bg-indigo-50 text-indigo-700' : 'bg-zinc-100 text-zinc-500'}`}>
+                      <span className={`px-2 py-0.5 rounded-full font-black ${isActive ? 'bg-indigo-50 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 border border-indigo-200/50 dark:border-indigo-800/50' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'}`}>
                         {isActive ? 'Active' : 'Disabled'}
                       </span>
                     </div>
@@ -381,13 +454,13 @@ export default function Actions({ onBack }: ActionsProps) {
             })}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-20 bg-zinc-50 rounded-3xl border border-dashed border-zinc-200 gap-4">
-            <div className="p-4 bg-white rounded-full shadow-sm border border-zinc-100">
-              <Activity size={48} className="text-zinc-300" />
+          <div className="flex flex-col items-center justify-center py-20 bg-zinc-50 dark:bg-zinc-900/50 rounded-3xl border border-dashed border-zinc-200 dark:border-zinc-800 gap-4">
+            <div className="p-4 bg-white dark:bg-zinc-800 rounded-full shadow-sm border border-zinc-100 dark:border-zinc-700">
+              <Activity size={48} className="text-zinc-300 dark:text-zinc-600" />
             </div>
             <div className="text-center px-4">
-              <p className="text-zinc-900 font-bold">No actions found</p>
-              <p className="text-zinc-500 text-xs mt-1">There are no macro actions matching your current filters.</p>
+              <p className="text-zinc-900 dark:text-white font-bold">No actions found</p>
+              <p className="text-zinc-500 dark:text-zinc-400 text-xs mt-1">There are no macro actions matching your current filters.</p>
             </div>
           </div>
         )}

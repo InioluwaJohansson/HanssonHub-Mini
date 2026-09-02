@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Fingerprint, Shield, Settings as SettingsIcon, KeyRound, Lock, X, LoaderCircle, CheckCircle, Moon, Sun, Globe, Check, Bell, ChevronLeft, Palette, Copy, Clock, Download, Smartphone } from 'lucide-react';
+import { Fingerprint, Shield, Settings as SettingsIcon, KeyRound, Lock, X, LoaderCircle, CheckCircle, Moon, Sun, Globe, Check, Bell, ChevronLeft, Palette, Copy, Clock, Download, Smartphone, ShieldAlert, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { isBiometricAvailable, authenticateBiometric, saveBiometricStoredToken, getBiometricStoredToken } from '../utils/biometrics';
 import { getToken, changePassword, changeAuthCode, getUserDetails, getBaseUrl, saveBaseUrl, api } from '../utils/api';
-import { rebuildHubConnections } from '../utils/signalr';
+import { rebuildHubConnections, homeSecurityHubConnection, startHomeSecurityHub } from '../utils/signalr';
 import ConfirmAuthModal from '../components/ConfirmAuthModal';
 import { triggerHaptic } from '../utils/haptics';
 import { isStandaloneMode, canInstallPWA, promptPWAInstall, onInstallableChange } from '../utils/pwa';
@@ -63,7 +63,7 @@ function ModalInput({
   );
 }
 
-export default function Settings({ onBack }: { onBack?: () => void, key?: string | React.Key }) {
+export default function Settings({ onBack, onLogout }: { onBack?: () => void, onLogout?: () => void, key?: string | React.Key }) {
   const userDetails = getUserDetails();
   const isOwner = String(userDetails?.RoleName || userDetails?.roleName || userDetails?.role || userDetails?.Role || '').toLowerCase() === 'owner';
 
@@ -239,7 +239,9 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
   const [showPassModal, setShowPassModal] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
-  const [pendingAction, setPendingAction] = useState<'password' | 'authCode' | null>(null);
+  const [showLogoutDevicesConfirm, setShowLogoutDevicesConfirm] = useState(false);
+  const [showLogoutAllUsersConfirm, setShowLogoutAllUsersConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'password' | 'authCode' | 'logoutDevices' | 'logoutAllUsers' | null>(null);
 
   // Password Form
   const [pToken, setPToken] = useState('');
@@ -378,6 +380,51 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
         } else {
             setErrorMsg(res?.message || 'Action failed. Please try again.');
         }
+      } else if (pendingAction === 'logoutDevices') {
+        const token = getToken() || localStorage.getItem('auth_token') || '';
+        const personId = Number(userId || userDetails?.personId || userDetails?.PersonId || 0);
+
+        try {
+          if (homeSecurityHubConnection && String(homeSecurityHubConnection.state) === 'Connected') {
+            await homeSecurityHubConnection.invoke("LogOutPersonId", token, Number(personId));
+          } else {
+            await startHomeSecurityHub();
+            if (String(homeSecurityHubConnection.state) === 'Connected') {
+              await homeSecurityHubConnection.invoke("LogOutPersonId", token, Number(personId));
+            }
+          }
+        } catch (hubErr) {
+          console.warn("Could not invoke LogOutPersonId via SignalR:", hubErr);
+        }
+
+        if (onLogout) {
+          onLogout();
+        } else {
+          window.dispatchEvent(new Event('app_logout'));
+        }
+        return;
+      } else if (pendingAction === 'logoutAllUsers') {
+        const token = getToken() || localStorage.getItem('auth_token') || '';
+
+        try {
+          if (homeSecurityHubConnection && String(homeSecurityHubConnection.state) === 'Connected') {
+            await homeSecurityHubConnection.invoke("LogOutAllUsers", token);
+          } else {
+            await startHomeSecurityHub();
+            if (String(homeSecurityHubConnection.state) === 'Connected') {
+              await homeSecurityHubConnection.invoke("LogOutAllUsers", token);
+            }
+          }
+        } catch (hubErr) {
+          console.warn("Could not invoke LogOutAllUsers via SignalR:", hubErr);
+        }
+
+        if (onLogout) {
+          onLogout();
+        } else {
+          window.dispatchEvent(new Event('app_logout'));
+        }
+        return;
       }
     } catch (err: any) {
       setErrorMsg(err?.response?.data?.message || 'Action failed. Please try again.');
@@ -545,92 +592,6 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
           )}
         </div>
 
-        {/* Change Auth Code Card */}
-        <button 
-          onClick={() => { setShowAuthModal(true); setErrorMsg(''); setSuccessMsg(''); }}
-          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-950/60">
-              <KeyRound size={24} className="text-indigo-600 dark:text-indigo-400" />
-            </div>
-            <div className="text-left">
-              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Auth Code</p>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your 6-digit PIN code</p>
-            </div>
-          </div>
-        </button>
-
-        {/* Change Password Card */}
-        <button 
-          onClick={() => { setShowPassModal(true); setErrorMsg(''); setSuccessMsg(''); }}
-          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60">
-              <Lock size={24} className="text-rose-600 dark:text-rose-400" />
-            </div>
-            <div className="text-left">
-              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Password</p>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your account password</p>
-            </div>
-          </div>
-        </button>
-
-        {/* Chat Theme Card */}
-        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
-              <Palette size={24} />
-            </div>
-            <div>
-              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Chat Bubble Theme</p>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">Select a color theme for your chat accents and send buttons</p>
-            </div>
-          </div>
-          
-          {/* Bubble Preview */}
-          <div className="bg-slate-150 dark:bg-zinc-900 p-4 rounded-xl flex flex-col gap-2 border border-slate-200/50">
-            <div className="flex justify-start">
-              <div className="bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 p-2.5 rounded-lg rounded-tl-none max-w-[80%] text-xs font-medium shadow-sm border border-zinc-200/50 dark:border-zinc-700/50">
-                Hey! Which color theme do you prefer?
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <div 
-                style={{ backgroundColor: selectedThemeColor }}
-                className="text-white p-2.5 rounded-lg rounded-tr-none max-w-[80%] text-xs font-semibold shadow-sm transition-all duration-300"
-              >
-                I really love this custom accent color! 😍
-              </div>
-            </div>
-          </div>
-
-          {/* Color Grid */}
-          <div className="grid grid-cols-6 sm:grid-cols-8 gap-2.5 mt-1">
-            {themeColors.map((color) => {
-              const isSelected = selectedThemeColor.toLowerCase() === color.hex.toLowerCase();
-              return (
-                <button
-                  key={color.name}
-                  onClick={() => handleSelectThemeColor(color.hex)}
-                  style={{ backgroundColor: color.hex }}
-                  className={`w-9 h-9 rounded-full relative transition-all duration-200 hover:scale-110 active:scale-95 focus:outline-none cursor-pointer border-2 ${
-                    isSelected ? 'border-slate-800 dark:border-white ring-2 ring-indigo-500/50 scale-105 shadow-md' : 'border-transparent shadow-sm'
-                  }`}
-                  title={color.name}
-                >
-                  {isSelected && (
-                    <div className="absolute inset-0 flex items-center justify-center text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] font-bold text-sm">
-                      ✓
-                    </div>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
         {/* Generate Token Card for Owners */}
         {isOwner && (
           <div className="bg-white dark:bg-zinc-800 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-700 flex flex-col gap-4 transition-colors">
@@ -689,6 +650,164 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
             </button>
           </div>
         )}
+
+        {/* Change Auth Code Card */}
+        <button 
+          onClick={() => { setShowAuthModal(true); setErrorMsg(''); setSuccessMsg(''); }}
+          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-indigo-100 dark:bg-indigo-950/60">
+              <KeyRound size={24} className="text-indigo-600 dark:text-indigo-400" />
+            </div>
+            <div className="text-left">
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Auth Code</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your 6-digit PIN code</p>
+            </div>
+          </div>
+        </button>
+
+        {/* Change Password Card */}
+        <button 
+          onClick={() => { setShowPassModal(true); setErrorMsg(''); setSuccessMsg(''); }}
+          className="w-full bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex items-center justify-between hover:border-blue-300 dark:hover:border-blue-500 transition-colors"
+        >
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-rose-100 dark:bg-rose-950/60">
+              <Lock size={24} className="text-rose-600 dark:text-rose-400" />
+            </div>
+            <div className="text-left">
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Change Password</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Update your account password</p>
+            </div>
+          </div>
+        </button>
+
+        {/* Session Security & Logout Card */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400">
+              <LogOut size={24} />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Session Security & Sign Out</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Manage active sessions across devices</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 pt-1">
+            {/* Logout from all devices */}
+            <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-100 dark:border-zinc-700/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 shrink-0">
+                  <Smartphone size={18} />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-900 dark:text-zinc-100 text-xs">Logout From All Devices</p>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">Sign out of all active sessions for your account</p>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  onClick={() => {
+                    triggerHaptic('heavy');
+                    setShowLogoutDevicesConfirm(true);
+                  }}
+                  className="px-3.5 py-2 rounded-xl bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/60 hover:bg-rose-100 dark:hover:bg-rose-900/60 active:scale-95 text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                >
+                  <LogOut size={13} />
+                  <span>Log Out</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Logout all users (Owner only) */}
+            {isOwner && (
+              <div className="flex flex-col gap-3 p-3.5 rounded-xl bg-red-50/70 dark:bg-red-950/30 border border-red-200/70 dark:border-red-900/40">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400 shrink-0">
+                    <ShieldAlert size={18} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="font-bold text-slate-900 dark:text-zinc-100 text-xs">Log Out All Users</p>
+                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold bg-red-100 dark:bg-red-900/60 text-red-700 dark:text-red-300">
+                        Owner
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">Terminate all active user sessions across system</p>
+                  </div>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={() => {
+                      triggerHaptic('heavy');
+                      setShowLogoutAllUsersConfirm(true);
+                    }}
+                    className="px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-sm"
+                  >
+                    <ShieldAlert size={13} />
+                    <span>Log Out All</span>
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Chat Theme Card */}
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 shadow-sm border border-slate-200 dark:border-zinc-800 flex flex-col gap-4 transition-colors">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+              <Palette size={24} />
+            </div>
+            <div>
+              <p className="font-bold text-slate-900 dark:text-zinc-100 text-sm">Chat Bubble Theme</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">Select a color theme for your chat accents and send buttons</p>
+            </div>
+          </div>
+          
+          {/* Bubble Preview */}
+          <div className="bg-slate-150 dark:bg-zinc-900 p-4 rounded-xl flex flex-col gap-2 border border-slate-200/50">
+            <div className="flex justify-start">
+              <div className="bg-white dark:bg-zinc-800 text-zinc-800 dark:text-zinc-100 p-2.5 rounded-lg rounded-tl-none max-w-[80%] text-xs font-medium shadow-sm border border-zinc-200/50 dark:border-zinc-700/50">
+                Hey! Which color theme do you prefer?
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <div 
+                style={{ backgroundColor: selectedThemeColor }}
+                className="text-white p-2.5 rounded-lg rounded-tr-none max-w-[80%] text-xs font-semibold shadow-sm transition-all duration-300"
+              >
+                I really love this custom accent color! 😍
+              </div>
+            </div>
+          </div>
+
+          {/* Color Grid */}
+          <div className="grid grid-cols-6 sm:grid-cols-8 gap-2.5 mt-1">
+            {themeColors.map((color) => {
+              const isSelected = selectedThemeColor.toLowerCase() === color.hex.toLowerCase();
+              return (
+                <button
+                  key={color.name}
+                  onClick={() => handleSelectThemeColor(color.hex)}
+                  style={{ backgroundColor: color.hex }}
+                  className={`w-9 h-9 rounded-full relative transition-all duration-200 hover:scale-110 active:scale-95 focus:outline-none cursor-pointer border-2 ${
+                    isSelected ? 'border-slate-800 dark:border-white ring-2 ring-indigo-500/50 scale-105 shadow-md' : 'border-transparent shadow-sm'
+                  }`}
+                  title={color.name}
+                >
+                  {isSelected && (
+                    <div className="absolute inset-0 flex items-center justify-center text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)] font-bold text-sm">
+                      ✓
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
 
       <AnimatePresence>
@@ -833,6 +952,107 @@ export default function Settings({ onBack }: { onBack?: () => void, key?: string
                   </button>
                 </form>
               )}
+            </motion.div>
+          </div>
+        )}
+        {/* Logout from all devices confirmation modal */}
+        {showLogoutDevicesConfirm && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setShowLogoutDevicesConfirm(false)} 
+                className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="flex flex-col items-center text-center mb-6">
+                <div className="p-3.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 mb-3">
+                  <Smartphone size={28} />
+                </div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-zinc-100 mb-1.5">
+                  Logout from All Devices
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed max-w-xs">
+                  Are you sure you want to log out from all devices? All active sessions for this account will be invalidated, and you will need to verify with your authorization code.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <button
+                  onClick={() => {
+                    setShowLogoutDevicesConfirm(false);
+                    setPendingAction('logoutDevices');
+                    setShowConfirmModal(true);
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                >
+                  <LogOut size={16} />
+                  <span>Confirm Logout</span>
+                </button>
+                <button
+                  onClick={() => setShowLogoutDevicesConfirm(false)}
+                  className="w-full py-3 rounded-xl border border-slate-300 dark:border-zinc-700 font-bold text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Logout all users confirmation modal (Owner only) */}
+        {showLogoutAllUsersConfirm && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[90] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-3xl p-6 w-full max-w-sm flex flex-col shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setShowLogoutAllUsersConfirm(false)} 
+                className="absolute top-4 right-4 text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+              >
+                <X size={20} />
+              </button>
+              
+              <div className="flex flex-col items-center text-center mb-6">
+                <div className="p-3.5 rounded-full bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 mb-3">
+                  <ShieldAlert size={28} />
+                </div>
+                <h2 className="text-lg font-black text-slate-900 dark:text-zinc-100 mb-1.5">
+                  Log Out All Users
+                </h2>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 leading-relaxed max-w-xs">
+                  Are you sure you want to log out all users across the system? Every user session will be immediately disconnected. You will need to verify with your authorization code.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2.5">
+                <button
+                  onClick={() => {
+                    setShowLogoutAllUsersConfirm(false);
+                    setPendingAction('logoutAllUsers');
+                    setShowConfirmModal(true);
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-[0.98] text-white font-bold text-xs transition-all shadow-sm flex items-center justify-center gap-2"
+                >
+                  <ShieldAlert size={16} />
+                  <span>Confirm Logout All Users</span>
+                </button>
+                <button
+                  onClick={() => setShowLogoutAllUsersConfirm(false)}
+                  className="w-full py-3 rounded-xl border border-slate-300 dark:border-zinc-700 font-bold text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

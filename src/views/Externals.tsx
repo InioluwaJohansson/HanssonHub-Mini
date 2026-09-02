@@ -17,13 +17,17 @@ import {
   ToggleLeft,
   ToggleRight,
   Shield,
-  LoaderCircle
+  LoaderCircle,
+  Filter,
+  ArrowUpDown,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { triggerHaptic } from '../utils/haptics';
 import { useData, ExternalData } from '../context/DataContext';
 import { activateDeactivateExternal, getAllExternals } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
+import { triggerAppNotification } from '../utils/notifications';
 
 interface ExternalsProps {
   key?: React.Key;
@@ -101,7 +105,8 @@ const FALLBACK_EXTERNALS: ExternalData[] = [
 export default function Externals({ onBack }: ExternalsProps) {
   const { externals, setExternals, loading, refreshData } = useData();
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'all' | 'triggered' | 'active' | 'inactive'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'triggered' | 'active' | 'inactive'>('all');
+  const [sortBy, setSortBy] = useState<'default' | 'triggered' | 'name_asc' | 'name_desc' | 'room'>('default');
   const [togglingId, setTogglingId] = useState<number | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [toasts, setToasts] = useState<{ id: string; message: string; type: 'info' | 'success' | 'warn' }[]>([]);
@@ -330,23 +335,41 @@ export default function Externals({ onBack }: ExternalsProps) {
     }
   };
 
-  const filteredExternals = displayExternals.filter(ext => {
-    const name = (ext.externalName || ext.ExternalName || '').toLowerCase();
-    const extIdStr = (ext.externalId || ext.ExternalId || '').toLowerCase();
-    const roomStr = (ext.roomName || ext.RoomName || '').toLowerCase();
-    const sectionStr = (ext.sectionName || ext.SectionName || '').toLowerCase();
-    const query = searchQuery.toLowerCase();
+  const filteredAndSortedExternals = displayExternals
+    .filter(ext => {
+      const name = (ext.externalName || ext.ExternalName || '').toLowerCase();
+      const extIdStr = (ext.externalId || ext.ExternalId || '').toLowerCase();
+      const roomStr = (ext.roomName || ext.RoomName || '').toLowerCase();
+      const sectionStr = (ext.sectionName || ext.SectionName || '').toLowerCase();
+      const query = searchQuery.toLowerCase();
 
-    const matchesSearch = name.includes(query) || extIdStr.includes(query) || roomStr.includes(query) || sectionStr.includes(query);
+      const matchesSearch = name.includes(query) || extIdStr.includes(query) || roomStr.includes(query) || sectionStr.includes(query);
 
-    const isTrig = Boolean(ext.isTriggered ?? ext.IsTriggered);
-    const isAct = Boolean(ext.isActive ?? ext.IsActive);
+      const isTrig = Boolean(ext.isTriggered ?? ext.IsTriggered);
+      const isAct = Boolean(ext.isActive ?? ext.IsActive);
 
-    if (activeTab === 'triggered') return matchesSearch && isTrig;
-    if (activeTab === 'active') return matchesSearch && isAct;
-    if (activeTab === 'inactive') return matchesSearch && !isAct;
-    return matchesSearch;
-  });
+      if (filterStatus === 'triggered') return matchesSearch && isTrig;
+      if (filterStatus === 'active') return matchesSearch && isAct;
+      if (filterStatus === 'inactive') return matchesSearch && !isAct;
+      return matchesSearch;
+    })
+    .sort((a, b) => {
+      if (sortBy === 'triggered') {
+        const aTrig = (a.isTriggered ?? a.IsTriggered) ? 1 : 0;
+        const bTrig = (b.isTriggered ?? b.IsTriggered) ? 1 : 0;
+        return bTrig - aTrig;
+      }
+      const nameA = (a.externalName || a.ExternalName || '').toLowerCase();
+      const nameB = (b.externalName || b.ExternalName || '').toLowerCase();
+      if (sortBy === 'name_asc') return nameA.localeCompare(nameB);
+      if (sortBy === 'name_desc') return nameB.localeCompare(nameA);
+      if (sortBy === 'room') {
+        const roomA = (a.roomName || a.RoomName || '').toLowerCase();
+        const roomB = (b.roomName || b.RoomName || '').toLowerCase();
+        return roomA.localeCompare(roomB);
+      }
+      return 0;
+    });
 
   const totalCount = displayExternals.length;
   const triggeredCount = displayExternals.filter(e => e.isTriggered ?? e.IsTriggered).length;
@@ -417,69 +440,82 @@ export default function Externals({ onBack }: ExternalsProps) {
       </div>
 
       {/* Search & Refresh Controls */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
-          <input 
-            type="text" 
-            autoComplete="off"
-            placeholder="Search external devices, locations..." 
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-700 focus:border-black dark:focus:border-white rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors text-zinc-900 dark:text-white"
-          />
-        </div>
-        <button
-          onClick={handleManualRefresh}
-          disabled={isRefreshing}
-          className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 active:scale-95 transition-all shrink-0"
-          title="Refresh Externals"
-        >
-          <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-emerald-500' : ''} />
-        </button>
-      </div>
-
-      {/* Filter Tabs - Highly Visible Segmented Pill Group */}
-      <div className="flex bg-zinc-100 dark:bg-zinc-800/90 p-1 rounded-xl border border-zinc-200/80 dark:border-zinc-700/80 shrink-0">
-        {[
-          { key: 'all', label: 'All', count: totalCount },
-          { key: 'triggered', label: 'Triggered', count: triggeredCount, alert: triggeredCount > 0 },
-          { key: 'active', label: 'Active', count: activeCount },
-          { key: 'inactive', label: 'Inactive', count: totalCount - activeCount }
-        ].map(tab => (
+      <div className="flex flex-col gap-2.5 mb-1 shrink-0">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={16} className="absolute left-0 top-1/2 -translate-y-1/2 text-zinc-400" />
+            <input 
+              type="text" 
+              autoComplete="off"
+              placeholder="Search external devices, locations..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-transparent border-b-2 border-zinc-200 dark:border-zinc-700 focus:border-emerald-500 dark:focus:border-emerald-400 rounded-none py-2 pl-6 pr-0 text-sm focus:outline-none transition-colors text-zinc-900 dark:text-white"
+            />
+          </div>
           <button
-            key={tab.key}
-            onClick={() => {
-              triggerHaptic('light');
-              setActiveTab(tab.key as any);
-            }}
-            className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-1.5 text-xs font-bold rounded-lg transition-all ${
-              activeTab === tab.key
-                ? tab.alert
-                  ? 'bg-rose-600 text-white shadow-sm'
-                  : 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-white shadow-sm border border-zinc-200/60 dark:border-zinc-600'
-                : tab.alert
-                ? 'text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30'
-                : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white'
-            }`}
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            className="p-2 rounded-xl border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 active:scale-95 transition-all shrink-0"
+            title="Refresh Externals"
           >
-            {tab.alert && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />}
-            <span className="truncate">{tab.label}</span>
-            <span className={`text-[10px] px-1.5 py-0.2 rounded-full shrink-0 font-bold ${
-              activeTab === tab.key
-                ? tab.alert ? 'bg-rose-700 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
-                : 'bg-zinc-200/70 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400'
-            }`}>
-              {tab.count}
-            </span>
+            <RefreshCw size={16} className={isRefreshing ? 'animate-spin text-emerald-500' : ''} />
           </button>
-        ))}
+        </div>
+
+        {/* Dropdown Filters (No segmented tab display) */}
+        <div className="flex items-center gap-2">
+          {/* Status Filter Dropdown */}
+          <div className="relative flex-1">
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100/90 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-200 transition-colors">
+              <Filter size={14} className="text-zinc-400 shrink-0" />
+              <select
+                aria-label="Filter Externals by Status"
+                value={filterStatus}
+                onChange={(e) => {
+                  triggerHaptic('selection');
+                  setFilterStatus(e.target.value as any);
+                }}
+                className="w-full bg-transparent text-xs font-bold text-zinc-800 dark:text-zinc-100 focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                <option value="all" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">All Externals ({totalCount})</option>
+                <option value="triggered" className="bg-white dark:bg-zinc-900 text-rose-600 dark:text-rose-400">Triggered Only ({triggeredCount})</option>
+                <option value="active" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Active Only ({activeCount})</option>
+                <option value="inactive" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Inactive Only ({totalCount - activeCount})</option>
+              </select>
+              <ChevronDown size={14} className="text-zinc-400 pointer-events-none absolute right-2.5" />
+            </div>
+          </div>
+
+          {/* Sort Order Dropdown */}
+          <div className="relative flex-1">
+            <div className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100/90 dark:bg-zinc-800/90 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-200 transition-colors">
+              <ArrowUpDown size={14} className="text-zinc-400 shrink-0" />
+              <select
+                aria-label="Sort Externals Order"
+                value={sortBy}
+                onChange={(e) => {
+                  triggerHaptic('selection');
+                  setSortBy(e.target.value as any);
+                }}
+                className="w-full bg-transparent text-xs font-bold text-zinc-800 dark:text-zinc-100 focus:outline-none cursor-pointer appearance-none pr-4"
+              >
+                <option value="default" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Default Sort</option>
+                <option value="triggered" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Triggered First</option>
+                <option value="name_asc" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Name (A – Z)</option>
+                <option value="name_desc" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Name (Z – A)</option>
+                <option value="room" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white">Location / Room</option>
+              </select>
+              <ChevronDown size={14} className="text-zinc-400 pointer-events-none absolute right-2.5" />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* External Devices List */}
       <div className="flex flex-col gap-3 mt-1">
-        {filteredExternals.length > 0 ? (
-          filteredExternals.map(ext => {
+        {filteredAndSortedExternals.length > 0 ? (
+          filteredAndSortedExternals.map(ext => {
             const extId = ext.id ?? ext.Id ?? 0;
             const extName = ext.externalName ?? ext.ExternalName ?? `External #${extId}`;
             const extCode = ext.externalId ?? ext.ExternalId ?? '';

@@ -14,9 +14,11 @@ import Externals from './views/Externals';
 import Chats from './views/Chats';
 import Settings from './views/Settings';
 import { startHomeSecurityHub, homeSecurityHubConnection, rebuildHubConnections } from './utils/signalr';
-import { LoaderCircle } from 'lucide-react';
+import { LoaderCircle, Lock, Unlock, DoorOpen, DoorClosed, Play, Radio, BellRing, MessageSquare } from 'lucide-react';
 import { refreshLoginToken, saveAppNamesList, getStoredAppNamesList, saveToken } from './utils/api';
 import { playNotificationSound, stopAllSounds } from './utils/audio';
+import { triggerHaptic } from './utils/haptics';
+import { AppNotification } from './utils/notifications';
 import { clearAllStores, clearStore, STORES } from './utils/db';
 
 import Logs from './views/Logs';
@@ -64,28 +66,57 @@ export default function App() {
   // Floating curved overlay notification states
   const [activeNotification, setActiveNotification] = useState<{
     isOpen: boolean;
-    senderName: string;
-    senderPhoto: string;
-    messageText: string;
+    id?: string;
+    title: string;
+    message: string;
+    photoUrl?: string;
+    type?: 'message' | 'door' | 'action' | 'external' | 'security' | 'info';
+    status?: 'locked' | 'unlocked' | 'open' | 'closed' | 'triggered' | 'active' | 'inactive' | 'success' | 'warn';
+    badge?: string;
+    chatId?: string;
   }>({
     isOpen: false,
-    senderName: '',
-    senderPhoto: '',
-    messageText: ''
+    title: '',
+    message: '',
+    photoUrl: '',
+    type: 'message'
   });
 
   const notificationTimeoutRef = useRef<any>(null);
 
-  const triggerNotification = (senderName: string, messageText: string, senderPhoto: string, chatId?: string) => {
+  const triggerNotification = useCallback((
+    titleOrNotif: string | AppNotification,
+    messageText?: string,
+    senderPhoto?: string,
+    chatId?: string,
+    type?: 'message' | 'door' | 'action' | 'external' | 'security' | 'info',
+    status?: 'locked' | 'unlocked' | 'open' | 'closed' | 'triggered' | 'active' | 'inactive' | 'success' | 'warn',
+    badge?: string
+  ) => {
     // Read notification settings
     const alertsEnabled = localStorage.getItem('alerts_enabled') !== 'false';
     if (!alertsEnabled) return;
-    
-    // Only suppress if we are ON the chats view AND looking at the exact same chat
-    if (currentViewRef.current === 'chats') {
+
+    let notifObj: AppNotification;
+    if (typeof titleOrNotif === 'object') {
+      notifObj = titleOrNotif;
+    } else {
+      notifObj = {
+        title: titleOrNotif,
+        message: messageText || '',
+        photoUrl: senderPhoto || '',
+        chatId,
+        type: type || 'message',
+        status,
+        badge
+      };
+    }
+
+    // Only suppress chat message notifications if we are ON the chats view AND actively in that exact same chat
+    if (notifObj.type === 'message' && currentViewRef.current === 'chats') {
       const activeChatId = (window as any).__activeChatId;
-      if (activeChatId && chatId && activeChatId === chatId) {
-        return; // We are actively in the chat where the message was sent
+      if (activeChatId && notifObj.chatId && String(activeChatId) === String(notifObj.chatId)) {
+        return; // We are actively viewing the open chat
       }
     }
 
@@ -93,45 +124,72 @@ export default function App() {
       clearTimeout(notificationTimeoutRef.current);
     }
 
+    // Trigger haptic and sound
+    triggerHaptic('incoming');
+    playNotificationSound('messageReceived');
+
     // Set floating in-app notification variables
     setActiveNotification({
       isOpen: true,
-      senderName,
-      messageText,
-      senderPhoto
+      id: notifObj.id || String(Date.now()),
+      title: notifObj.title || 'System Notification',
+      message: notifObj.message || '',
+      photoUrl: notifObj.photoUrl || '',
+      type: notifObj.type || 'message',
+      status: notifObj.status,
+      badge: notifObj.badge,
+      chatId: notifObj.chatId
     });
 
-    // Close in exactly 7 seconds
+    // Close in exactly 6.5 seconds
+    const duration = notifObj.duration || 6500;
     notificationTimeoutRef.current = setTimeout(() => {
       setActiveNotification(prev => ({ ...prev, isOpen: false }));
-    }, 7000);
+    }, duration);
 
     // Minimize / background parsing hooks
     const isBackground = document.visibilityState === 'hidden';
     if (isBackground) {
-      console.log("[BG_NOTIFICATION_PARSED]", JSON.stringify({ senderName, messageText, senderPhoto }));
+      console.log("[BG_NOTIFICATION_PARSED]", JSON.stringify(notifObj));
 
       // Bridge for standard mobile wrappers or Cordova / native postMessage
       if (typeof (window as any).ReactNativeWebView !== 'undefined') {
         (window as any).ReactNativeWebView.postMessage(JSON.stringify({
           type: "notification",
-          title: senderName,
-          body: messageText,
-          icon: senderPhoto
+          title: notifObj.title,
+          body: notifObj.message,
+          icon: notifObj.photoUrl
         }));
       }
 
       // Standalone browser Notification
       if ('Notification' in window) {
         if (Notification.permission === 'granted') {
-          new Notification(senderName, {
-            body: messageText,
-            icon: senderPhoto
-          });
+          try {
+            new Notification(notifObj.title, {
+              body: notifObj.message,
+              icon: notifObj.photoUrl
+            });
+          } catch (e) {
+            console.warn("Notification display error", e);
+          }
         }
       }
     }
-  };
+  }, []);
+
+  // Listen to global custom notification dispatch events
+  useEffect(() => {
+    const handleCustomNotif = (e: CustomEvent<AppNotification>) => {
+      if (e.detail) {
+        triggerNotification(e.detail);
+      }
+    };
+    window.addEventListener('show_custom_notification' as any, handleCustomNotif as any);
+    return () => {
+      window.removeEventListener('show_custom_notification' as any, handleCustomNotif as any);
+    };
+  }, [triggerNotification]);
 
   // HTML5 Web notification permission request
   useEffect(() => {
@@ -239,24 +297,26 @@ export default function App() {
         const stored = localStorage.getItem('user_details');
         if (stored) {
           const userObj = JSON.parse(stored);
-          cachedUserId = userObj.id || userObj.Id || 0;
+          cachedUserId = Number(userObj.id ?? userObj.Id ?? userObj.personId ?? userObj.PersonId ?? 0);
         }
       } catch (err) {
         console.warn("Could not retrieve current user details inside notification listener", err);
       }
 
-      const isMe = cachedUserId && Number(msgSenderId) === Number(cachedUserId);
+      const isMe = cachedUserId > 0 && Number(msgSenderId) === Number(cachedUserId);
       
       // Trigger notification if not sent by user
       if (!isMe) {
         const msgChatId = (msg.chatId || msg.ChatId)?.toString();
-        const activeChatId = localStorage.getItem('activeChatId');
         
-        if (msgChatId === activeChatId) {
-            playNotificationSound('messageReceived');
-        }
-        
-        triggerNotification(senderName, text, finalPhoto, msgChatId);
+        triggerNotification({
+          title: senderName,
+          message: text,
+          photoUrl: finalPhoto,
+          chatId: msgChatId,
+          type: 'message',
+          badge: 'Chat'
+        });
 
         // Presence: Set user to online
         if (msgSenderId) {
@@ -304,18 +364,28 @@ export default function App() {
       }
     };
 
+    const handleAppLogout = () => {
+      handleLogoutRef.current();
+    };
+    window.addEventListener('app_logout', handleAppLogout);
+
     homeSecurityHubConnection.on("MessageSent", handleReceivedMessage);
     homeSecurityHubConnection.on("ReceiveMessage", handleReceivedMessage);
     homeSecurityHubConnection.on("GetAppNamesDetails", handleGetAppNamesDetails);
     homeSecurityHubConnection.on("HighLevelLogOut", handleHighLevelLogOut);
+    homeSecurityHubConnection.on("highLevelLogOut", handleHighLevelLogOut);
     homeSecurityHubConnection.on("LogOut", handleLogOut);
+    homeSecurityHubConnection.on("logOut", handleLogOut);
     
     return () => {
+      window.removeEventListener('app_logout', handleAppLogout);
       homeSecurityHubConnection.off("MessageSent", handleReceivedMessage);
       homeSecurityHubConnection.off("ReceiveMessage", handleReceivedMessage);
       homeSecurityHubConnection.off("GetAppNamesDetails", handleGetAppNamesDetails);
       homeSecurityHubConnection.off("HighLevelLogOut", handleHighLevelLogOut);
+      homeSecurityHubConnection.off("highLevelLogOut", handleHighLevelLogOut);
       homeSecurityHubConnection.off("LogOut", handleLogOut);
+      homeSecurityHubConnection.off("logOut", handleLogOut);
     };
   }, []);
 
@@ -738,7 +808,7 @@ export default function App() {
                     {currentView === 'externals' && <Externals key={`ext-${refreshKey}`} onBack={() => changeViewWithTransition('facilities')} />}
                     {currentView === 'chats' && <div key={`chat-${refreshKey}`} className="contents"></div>}
                     {currentView === 'logs' && <Logs key={`log-${refreshKey}`} />}
-                    {currentView === 'settings' && <Settings key={`set-${refreshKey}`} onBack={previousView ? () => changeViewWithTransition(previousView) : undefined} />}
+                    {currentView === 'settings' && <Settings key={`set-${refreshKey}`} onLogout={handleLogout} onBack={previousView ? () => changeViewWithTransition(previousView) : undefined} />}
                   </motion.div>
                 </AnimatePresence>
 
@@ -755,42 +825,118 @@ export default function App() {
           )}
         </AnimatePresence>
 
-        {/* Curved Floating Overlay Notification (Curved, Dark Border, Background Opacity .5, Scales out from center) */}
+        {/* Curved Floating Overlay Notification */}
         <AnimatePresence>
           {activeNotification.isOpen && (
             <motion.div
+              key={`floating-overlay-${activeNotification.id || 'notif'}`}
               variants={{
-                hidden: { scaleX: 0, opacity: 0 },
-                visible: { scaleX: 1, opacity: 1, transition: { duration: 1.5, ease: [0.16, 1, 0.3, 1] } },
-                exit: { scaleX: 0, opacity: 0, transition: { duration: 0.9, ease: [0.16, 1, 0.3, 1] } }
+                hidden: { opacity: 0, y: -24, scale: 0.9, x: '-50%' },
+                visible: { 
+                  opacity: 1, 
+                  y: 0, 
+                  scale: 1, 
+                  x: '-50%',
+                  transition: { type: 'spring', damping: 22, stiffness: 350, mass: 0.8 } 
+                },
+                exit: { 
+                  opacity: 0, 
+                  y: -18, 
+                  scale: 0.9, 
+                  x: '-50%',
+                  transition: { duration: 0.22, ease: 'easeInOut' } 
+                }
               }}
               initial="hidden"
               animate="visible"
               exit="exit"
-              style={{ transformOrigin: 'center' }}
-              className="absolute top-[64px] -translate-y-1/2 left-1/2 -translate-x-1/2 w-auto max-w-[75%] bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md border border-zinc-300 dark:border-zinc-700 shadow-2xl z-[300] rounded-full overflow-hidden"
+              onClick={() => {
+                const notifType = activeNotification.type;
+                const chatId = activeNotification.chatId;
+
+                if (notifType === 'message' || chatId) {
+                  changeViewWithTransition('chats');
+                } else if (notifType === 'door') {
+                  changeViewWithTransition('doors');
+                } else if (notifType === 'action') {
+                  changeViewWithTransition('actions');
+                } else if (notifType === 'external') {
+                  changeViewWithTransition('externals');
+                }
+                setActiveNotification(prev => ({ ...prev, isOpen: false }));
+              }}
+              className="absolute top-16 left-1/2 w-[92%] max-w-[390px] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl border border-zinc-300/80 dark:border-zinc-700/80 shadow-[0_12px_36px_rgba(0,0,0,0.22)] z-[400] rounded-full overflow-hidden cursor-pointer select-none active:scale-[0.98] transition-transform"
             >
-              <div className="flex items-center gap-4 px-4 py-2 bg-transparent w-full">
-                <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 border border-black/10 dark:border-white/10 relative">
-                  {activeNotification.senderPhoto ? (
+              <div className="flex items-center gap-3.5 px-3.5 py-2.5 bg-transparent w-full">
+                <div className="w-10 h-10 rounded-full overflow-hidden shrink-0 border border-black/10 dark:border-white/10 relative flex items-center justify-center bg-zinc-100 dark:bg-zinc-800">
+                  {activeNotification.photoUrl ? (
                     <img 
-                      src={activeNotification.senderPhoto} 
+                      src={activeNotification.photoUrl} 
                       alt="" 
                       className="w-full h-full object-cover rounded-full pointer-events-none"
                       referrerPolicy="no-referrer"
                     />
+                  ) : activeNotification.type === 'door' ? (
+                    <div className={`w-full h-full ${
+                      activeNotification.status === 'locked' 
+                        ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400' 
+                        : activeNotification.status === 'unlocked' 
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' 
+                        : activeNotification.status === 'open' 
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400' 
+                        : 'bg-zinc-500/15 text-zinc-600 dark:text-zinc-400'
+                    } flex items-center justify-center rounded-full`}>
+                      {activeNotification.status === 'locked' ? (
+                        <Lock size={18} />
+                      ) : activeNotification.status === 'unlocked' ? (
+                        <Unlock size={18} />
+                      ) : activeNotification.status === 'open' ? (
+                        <DoorOpen size={18} />
+                      ) : (
+                        <DoorClosed size={18} />
+                      )}
+                    </div>
+                  ) : activeNotification.type === 'action' ? (
+                    <div className={`w-full h-full ${
+                      activeNotification.status === 'triggered' || activeNotification.status === 'active'
+                        ? 'bg-indigo-500/15 text-indigo-600 dark:text-indigo-400' 
+                        : 'bg-zinc-500/15 text-zinc-500'
+                    } flex items-center justify-center rounded-full`}>
+                      <Play size={18} className={activeNotification.status === 'triggered' ? 'fill-indigo-600 dark:fill-indigo-400' : ''} />
+                    </div>
+                  ) : activeNotification.type === 'external' ? (
+                    <div className={`w-full h-full ${
+                      activeNotification.status === 'triggered'
+                        ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400'
+                        : activeNotification.status === 'active'
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : 'bg-zinc-500/15 text-zinc-500'
+                    } flex items-center justify-center rounded-full`}>
+                      {activeNotification.status === 'triggered' ? (
+                        <BellRing size={18} className="animate-pulse text-rose-600 dark:text-rose-400" />
+                      ) : (
+                        <Radio size={18} />
+                      )}
+                    </div>
                   ) : (
-                    <div className="w-full h-full bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center font-black text-xs uppercase rounded-full">
-                      {activeNotification.senderName.charAt(0)}
+                    <div className="w-full h-full bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 flex items-center justify-center font-black text-xs uppercase rounded-full">
+                      {activeNotification.title ? activeNotification.title.charAt(0) : <MessageSquare size={18} />}
                     </div>
                   )}
                 </div>
-                <div className="flex-1 min-w-0 pr-1.5 py-0.5">
-                  <p className="font-bold text-sm leading-tight text-black dark:text-white truncate">
-                    {activeNotification.senderName}
-                  </p>
-                  <p className="text-xs leading-tight text-zinc-900 dark:text-zinc-200 font-normal truncate mt-0.5 max-w-full">
-                    {activeNotification.messageText}
+                <div className="flex-1 min-w-0 pr-2 py-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <p className="font-black text-xs leading-tight text-zinc-900 dark:text-white truncate">
+                      {activeNotification.title}
+                    </p>
+                    {activeNotification.badge && (
+                      <span className="text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 shrink-0">
+                        {activeNotification.badge}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] leading-snug text-zinc-700 dark:text-zinc-300 font-medium truncate mt-0.5 max-w-full">
+                    {activeNotification.message}
                   </p>
                 </div>
               </div>

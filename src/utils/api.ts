@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 export const getBaseUrl = (): string => {
-  return localStorage.getItem('api_base_url') || 'https://q9l0xpmb-7190.uks1.devtunnels.ms';
+  return localStorage.getItem('api_base_url') || 'https://kv5zhpcr-7190.uks1.devtunnels.ms';
 };
 //https://kv5zhpcr-7190.uks1.devtunnels.ms
 //https://q9l0xpmb-7190.uks1.devtunnels.ms/

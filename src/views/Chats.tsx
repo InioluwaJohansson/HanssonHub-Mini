@@ -2803,6 +2803,29 @@ export default function Chats({
         });
         if (updatedItem) {
           return [updatedItem, ...nextList.filter(c => c.id !== chatIdStr)];
+        } else {
+          const cidNum = parseInt(chatIdStr);
+          if (!isNaN(cidNum)) {
+            getChatById(cidNum).then(freshChat => {
+              if (freshChat) {
+                const formattedChat: any = {
+                  id: freshChat.id.toString(),
+                  name: freshChat.name || `Chat #${freshChat.id}`,
+                  lastMessage: getDescriptiveLastMessage(msg),
+                  time: formatLastMessageTime(msg.sentAt || msg.SentAt || new Date()),
+                  unread: (msg.senderPersonId || msg.SenderPersonId) === currentUid ? 0 : 1,
+                  isGroup: !!freshChat.isGroup,
+                  description: freshChat.description || '',
+                  participants: freshChat.participants || [],
+                  imageUrl: freshChat.imageUrl || freshChat.ImageUrl || freshChat.imgUrl || freshChat.ImgUrl || '',
+                  lastMessageSenderId: msg.senderPersonId || msg.SenderPersonId || 0,
+                  lastMessageSentAt: msg.sentAt || msg.SentAt || new Date().toISOString()
+                };
+                setLocalChatList(curr => [formattedChat, ...curr.filter(c => c.id !== chatIdStr)]);
+                saveData(STORES.CHATS, formattedChat).catch(() => {});
+              }
+            }).catch(() => {});
+          }
         }
         return nextList;
       });
@@ -5639,8 +5662,15 @@ export default function Chats({
                   .filter(chat => chat.name.toLowerCase().includes(searchQuery.toLowerCase()))
                   .sort((a, b) => new Date(b.lastMessageSentAt || 0).getTime() - new Date(a.lastMessageSentAt || 0).getTime())
                   .map((chat, idx) => (
-                  <div 
+                  <motion.div 
+                    layout
                     key={chat.id ? `chat-item-${chat.id}` : `chat-item-idx-${idx}`} 
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{
+                      layout: { type: "spring", stiffness: 350, damping: 28 },
+                      opacity: { duration: 0.2 }
+                    }}
                     onClick={async () => {
                        setActiveChat(chat);
                        try {
@@ -5746,7 +5776,7 @@ export default function Chats({
                         )}
                       </div>
                     </div>
-                  </div>
+                  </motion.div>
                 ))
               )
             )}

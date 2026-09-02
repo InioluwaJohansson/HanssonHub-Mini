@@ -4,6 +4,7 @@ import { motion } from 'motion/react';
 import { lockDoor, unlockDoor } from '../utils/api';
 import { useData } from '../context/DataContext';
 import { triggerHaptic } from '../utils/haptics';
+import { triggerAppNotification } from '../utils/notifications';
 
 interface DoorsProps {
   key?: React.Key;
@@ -17,6 +18,13 @@ export default function Doors({ onBack }: DoorsProps) {
   const toggleLock = async (door: any) => {
     try {
       triggerHaptic(door.isLocked ? 'unlock' : 'lock');
+      triggerAppNotification({
+        title: door.name || `Door #${door.id}`,
+        message: door.isLocked ? 'Door Unlocked' : 'Door Secured & Locked',
+        type: 'door',
+        status: door.isLocked ? 'unlocked' : 'locked',
+        badge: 'Door'
+      });
       // Lock & Unlock call PUT /Door/LockDoor?id={id}
       await lockDoor(door.id);
       triggerHaptic('success');
@@ -29,6 +37,13 @@ export default function Doors({ onBack }: DoorsProps) {
   const toggleOpen = async (door: any) => {
     try {
       triggerHaptic(door.isOpen ? 'lock' : 'unlock');
+      triggerAppNotification({
+        title: door.name || `Door #${door.id}`,
+        message: door.isOpen ? 'Door Closed' : 'Door Opened',
+        type: 'door',
+        status: door.isOpen ? 'closed' : 'open',
+        badge: 'Door'
+      });
       // Open & Close call PUT /Door/UnlockDoor?id={id}
       await unlockDoor(door.id);
       triggerHaptic('success');

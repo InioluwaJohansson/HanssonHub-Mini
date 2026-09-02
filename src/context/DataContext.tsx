@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { getAllDoorsByDoorType, getAllCameras, getAllActions, getAllExternals } from '../utils/api';
 import { homeSecurityHubConnection } from '../utils/signalr';
 import { saveData, getAllData, STORES } from '../utils/db';
+import { triggerAppNotification } from '../utils/notifications';
 
 export interface DoorData {
   id: string;
@@ -433,6 +434,29 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
          setDoors(prev => prev.filter(d => String(d.id) !== targetId && (!d.doorId || String(d.doorId) !== targetId)));
          return;
        }
+
+       const doorName = data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? `Door #${data.id ?? data.Id}`;
+       const isLocked = data.isLocked ?? data.IsLocked;
+       const isOpen = data.isOpen ?? data.IsOpen;
+
+       if (isLocked !== undefined) {
+         triggerAppNotification({
+           title: doorName,
+           message: isLocked ? 'Door Secured & Locked' : 'Door Unlocked',
+           type: 'door',
+           status: isLocked ? 'locked' : 'unlocked',
+           badge: 'Door'
+         });
+       } else if (isOpen !== undefined) {
+         triggerAppNotification({
+           title: doorName,
+           message: isOpen ? 'Door Opened' : 'Door Closed',
+           type: 'door',
+           status: isOpen ? 'open' : 'closed',
+           badge: 'Door'
+         });
+       }
+
        setDoors(prev => prev.map(d => {
          const targetId = String(data.id ?? data.Id);
          if (String(d.id) === targetId || (d.doorId && String(d.doorId) === targetId)) {
@@ -453,6 +477,28 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleDoorTriggered = (data: any) => {
        if (!isMatchingDoor(data)) return;
        const triggeredId = String(data.id ?? data.Id);
+       const doorName = data.doorName ?? data.DoorName ?? data.name ?? data.Name ?? `Door #${triggeredId}`;
+       const isLocked = data.isLocked ?? data.IsLocked;
+       const isOpen = data.isOpen ?? data.IsOpen;
+
+       if (isLocked !== undefined) {
+         triggerAppNotification({
+           title: doorName,
+           message: isLocked ? 'Door Secured & Locked' : 'Door Unlocked',
+           type: 'door',
+           status: isLocked ? 'locked' : 'unlocked',
+           badge: 'Door'
+         });
+       } else if (isOpen !== undefined) {
+         triggerAppNotification({
+           title: doorName,
+           message: isOpen ? 'Door Opened' : 'Door Closed',
+           type: 'door',
+           status: isOpen ? 'open' : 'closed',
+           badge: 'Door'
+         });
+       }
+
        setDoors(prev => prev.map(d => {
          if (String(d.id) === triggeredId || (d.doorId && String(d.doorId) === triggeredId)) {
            return {
@@ -606,6 +652,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (parsed.actionId && parsed.isActive !== undefined) {
         const targetId = parsed.actionId;
         const targetActive = parsed.isActive;
+        const actName = parsed.actionName || `Action #${targetId}`;
+
+        triggerAppNotification({
+          title: actName,
+          message: targetActive ? 'Security action routine enabled' : 'Security action routine disabled',
+          type: 'action',
+          status: targetActive ? 'active' : 'inactive',
+          badge: 'Action'
+        });
+
         setActions(prev => prev.map(act => {
           const currId = Number(act.id ?? act.Id);
           if (currId === targetId) {
@@ -635,6 +691,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('[SignalR ActionTriggered received]:', args);
       const parsed = parseActionSignalRPayload(...args);
       const actId = parsed.actionId;
+
+      const actName = parsed.actionName || (actId ? `Action #${actId}` : 'Action Routine');
+      triggerAppNotification({
+        title: actName,
+        message: 'Security action routine initiated',
+        type: 'action',
+        status: 'triggered',
+        badge: 'Action'
+      });
+
       if (actId && parsed.isActive !== undefined) {
         setActions(prev => prev.map(act => {
           const currId = Number(act.id ?? act.Id);
@@ -785,6 +851,17 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const targetExtId = String(data.externalId ?? data.ExternalId ?? '');
       const isTrig = data.isTriggered !== undefined ? Boolean(data.isTriggered) : (data.IsTriggered !== undefined ? Boolean(data.IsTriggered) : true);
       const isAct = data.isActive !== undefined ? Boolean(data.isActive) : (data.IsActive !== undefined ? Boolean(data.IsActive) : undefined);
+      const extName = data.externalName ?? data.ExternalName ?? (targetExtId || (targetId ? `External #${targetId}` : 'External Sensor'));
+
+      if (isTrig) {
+        triggerAppNotification({
+          title: extName,
+          message: 'External perimeter sensor triggered!',
+          type: 'external',
+          status: 'triggered',
+          badge: 'External'
+        });
+      }
 
       setExternals(prev => prev.map(ext => {
         if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
@@ -809,6 +886,18 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       let isTriggered: boolean | undefined = undefined;
       if (data?.isTriggered !== undefined) isTriggered = Boolean(data.isTriggered);
       else if (data?.IsTriggered !== undefined) isTriggered = Boolean(data.IsTriggered);
+
+      const extName = data.externalName ?? data.ExternalName ?? (targetExtId || (targetId ? `External #${targetId}` : 'External Device'));
+
+      if (isActive !== undefined) {
+        triggerAppNotification({
+          title: extName,
+          message: isActive ? 'External device enabled' : 'External device disabled',
+          type: 'external',
+          status: isActive ? 'active' : 'inactive',
+          badge: 'External'
+        });
+      }
 
       setExternals(prev => prev.map(ext => {
         if (ext.id === targetId || (targetExtId && ext.externalId === targetExtId)) {
